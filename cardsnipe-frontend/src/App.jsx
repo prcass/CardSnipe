@@ -1,0 +1,423 @@
+import React, { useState, useEffect, useCallback } from 'react';
+
+// ============================================
+// CONFIGURATION - Update this after deployment!
+// ============================================
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+// ============================================
+// API CLIENT
+// ============================================
+const api = {
+  async getDeals(filters = {}) {
+    const params = new URLSearchParams();
+    if (filters.sport && filters.sport !== 'all') params.append('sport', filters.sport);
+    if (filters.type && filters.type !== 'all') params.append('type', filters.type);
+    if (filters.minDealScore) params.append('minDealScore', filters.minDealScore);
+    if (filters.search) params.append('search', filters.search);
+    if (filters.gradeType && filters.gradeType !== 'all') params.append('grade', filters.gradeType);
+    params.append('sortBy', filters.sortBy || 'dealScore');
+    
+    const response = await fetch(`${API_URL}/api/deals?${params}`);
+    if (!response.ok) throw new Error('Failed to fetch deals');
+    return response.json();
+  },
+  
+  async getStats() {
+    const response = await fetch(`${API_URL}/api/stats`);
+    if (!response.ok) throw new Error('Failed to fetch stats');
+    return response.json();
+  }
+};
+
+// ============================================
+// MAIN COMPONENT
+// ============================================
+const CardDealFinder = () => {
+  const [listings, setListings] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [filters, setFilters] = useState({
+    sport: 'all',
+    type: 'all',
+    minDealScore: 0,
+    search: '',
+    gradeType: 'all',
+    sortBy: 'dealScore'
+  });
+  const [lastRefresh, setLastRefresh] = useState(new Date());
+  const [isDemo, setIsDemo] = useState(false);
+
+  // Fetch deals from API
+  const fetchDeals = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const [dealsResponse, statsResponse] = await Promise.all([
+        api.getDeals(filters),
+        api.getStats()
+      ]);
+      
+      setListings(dealsResponse.data || []);
+      setStats(statsResponse.data);
+      setLastRefresh(new Date());
+      setIsDemo(false);
+    } catch (err) {
+      console.error('API Error:', err);
+      // Fall back to demo mode
+      setIsDemo(true);
+      setListings(generateDemoData());
+      setStats({
+        total_deals: 47,
+        hot_deals: 12,
+        ending_soon: 8,
+        total_potential_profit: 4250,
+        avg_deal_score: 28
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [filters]);
+
+  // Initial load and auto-refresh
+  useEffect(() => {
+    fetchDeals();
+    const interval = setInterval(fetchDeals, 30000); // Refresh every 30s
+    return () => clearInterval(interval);
+  }, [fetchDeals]);
+
+  // Countdown timer update
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setListings(prev => [...prev]);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Apply local filters for demo mode
+  const filteredListings = isDemo ? listings.filter(l => {
+    if (filters.sport !== 'all' && l.sport !== filters.sport) return false;
+    if (filters.type === 'auction' && !l.isAuction) return false;
+    if (filters.type === 'buyNow' && l.isAuction) return false;
+    if (l.dealScore < filters.minDealScore) return false;
+    if (filters.search && !l.title.toLowerCase().includes(filters.search.toLowerCase())) return false;
+    return true;
+  }) : listings;
+
+  const formatTimeRemaining = (endTime) => {
+    if (!endTime) return null;
+    const diff = new Date(endTime) - new Date();
+    if (diff <= 0) return 'Ended';
+    
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+    
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
+  };
+
+  const getDealScoreColor = (score) => {
+    if (score >= 40) return 'bg-green-500';
+    if (score >= 25) return 'bg-yellow-500';
+    return 'bg-orange-500';
+  };
+
+  const getUrgencyClass = (endTime) => {
+    if (!endTime) return '';
+    const diff = new Date(endTime) - new Date();
+    if (diff < 5 * 60 * 1000) return 'animate-pulse bg-red-900/30';
+    if (diff < 30 * 60 * 1000) return 'bg-orange-900/20';
+    return '';
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-900 text-white p-4">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <span className="text-3xl">🃏</span> CardSnipe
+              <span className={`text-sm font-normal px-2 py-1 rounded-full ${isDemo ? 'bg-yellow-600' : 'bg-green-600'}`}>
+                {isDemo ? 'DEMO' : 'LIVE'}
+              </span>
+            </h1>
+            <p className="text-gray-400 text-sm mt-1">
+              Real-time undervalued card finder • {filteredListings.length} deals found
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-500">
+              Updated {lastRefresh.toLocaleTimeString()}
+            </span>
+            <button
+              onClick={fetchDeals}
+              disabled={loading}
+              className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium flex items-center gap-2 disabled:opacity-50"
+            >
+              {loading ? <span className="animate-spin">⟳</span> : <span>⟳</span>}
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {/* Demo Mode Banner */}
+        {isDemo && (
+          <div className="bg-yellow-900/30 border border-yellow-600 rounded-lg p-3 mb-4 text-sm">
+            <strong>Demo Mode:</strong> Backend not connected. Showing sample data. 
+            <a href="#setup" className="underline ml-2">Set up your backend →</a>
+          </div>
+        )}
+
+        {/* Error Banner */}
+        {error && (
+          <div className="bg-red-900/30 border border-red-600 rounded-lg p-3 mb-4 text-sm">
+            {error}
+          </div>
+        )}
+
+        {/* Filters */}
+        <div className="bg-gray-800 rounded-xl p-4 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+            <input
+              type="text"
+              placeholder="Search player, set, team..."
+              value={filters.search}
+              onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+              className="col-span-2 bg-gray-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <select
+              value={filters.sport}
+              onChange={(e) => setFilters({ ...filters, sport: e.target.value })}
+              className="bg-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none"
+            >
+              <option value="all">All Sports</option>
+              <option value="basketball">🏀 Basketball</option>
+              <option value="baseball">⚾ Baseball</option>
+            </select>
+            <select
+              value={filters.type}
+              onChange={(e) => setFilters({ ...filters, type: e.target.value })}
+              className="bg-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none"
+            >
+              <option value="all">All Listings</option>
+              <option value="auction">⏱️ Auctions</option>
+              <option value="buyNow">💰 Buy Now</option>
+            </select>
+            <select
+              value={filters.gradeType}
+              onChange={(e) => setFilters({ ...filters, gradeType: e.target.value })}
+              className="bg-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none"
+            >
+              <option value="all">All Grades</option>
+              <option value="graded">Graded Only</option>
+              <option value="raw">Raw Only</option>
+            </select>
+            <select
+              value={filters.sortBy}
+              onChange={(e) => setFilters({ ...filters, sortBy: e.target.value })}
+              className="bg-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none"
+            >
+              <option value="dealScore">Best Deals</option>
+              <option value="endingSoon">Ending Soon</option>
+              <option value="priceLow">Price: Low</option>
+            </select>
+          </div>
+          <div className="mt-3 flex items-center gap-4">
+            <span className="text-sm text-gray-400">Min Deal Score:</span>
+            <input
+              type="range"
+              min="0"
+              max="50"
+              value={filters.minDealScore}
+              onChange={(e) => setFilters({ ...filters, minDealScore: parseInt(e.target.value) })}
+              className="w-32"
+            />
+            <span className="text-sm font-medium text-green-400">{filters.minDealScore}%+</span>
+          </div>
+        </div>
+
+        {/* Stats Bar */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          <div className="bg-gray-800 rounded-lg p-3 text-center">
+            <div className="text-2xl font-bold text-green-400">
+              {stats?.hot_deals || filteredListings.filter(l => l.dealScore >= 30).length}
+            </div>
+            <div className="text-xs text-gray-400">Hot Deals (30%+ off)</div>
+          </div>
+          <div className="bg-gray-800 rounded-lg p-3 text-center">
+            <div className="text-2xl font-bold text-orange-400">
+              {stats?.ending_soon || filteredListings.filter(l => l.isAuction && new Date(l.auctionEndTime || l.endTime) - new Date() < 60 * 60 * 1000).length}
+            </div>
+            <div className="text-xs text-gray-400">Ending &lt; 1 Hour</div>
+          </div>
+          <div className="bg-gray-800 rounded-lg p-3 text-center">
+            <div className="text-2xl font-bold text-blue-400">
+              ${(stats?.total_potential_profit || filteredListings.reduce((sum, l) => sum + (l.marketValue - l.currentPrice), 0)).toLocaleString()}
+            </div>
+            <div className="text-xs text-gray-400">Total Potential Profit</div>
+          </div>
+          <div className="bg-gray-800 rounded-lg p-3 text-center">
+            <div className="text-2xl font-bold text-purple-400">
+              {Math.round(stats?.avg_deal_score || (filteredListings.reduce((sum, l) => sum + l.dealScore, 0) / filteredListings.length) || 0)}%
+            </div>
+            <div className="text-xs text-gray-400">Avg Discount</div>
+          </div>
+        </div>
+
+        {/* Loading State */}
+        {loading && listings.length === 0 && (
+          <div className="text-center py-12">
+            <div className="animate-spin text-4xl mb-4">⟳</div>
+            <p className="text-gray-400">Loading deals...</p>
+          </div>
+        )}
+
+        {/* Listings Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredListings.map(listing => (
+            <a
+              key={listing.id || listing.ebayItemId}
+              href={listing.listingUrl || listing.listing_url || '#'}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`bg-gray-800 rounded-xl overflow-hidden hover:ring-2 hover:ring-blue-500 transition-all cursor-pointer block ${getUrgencyClass(listing.auctionEndTime || listing.endTime)}`}
+            >
+              <div className="flex">
+                {/* Card Image */}
+                <div className="w-24 h-32 bg-gradient-to-br from-gray-700 to-gray-800 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                  {listing.imageUrl || listing.image_url ? (
+                    <img 
+                      src={listing.imageUrl || listing.image_url} 
+                      alt={listing.title}
+                      className="w-full h-full object-cover"
+                      onError={(e) => { e.target.style.display = 'none'; e.target.parentElement.innerHTML = listing.sport === 'basketball' ? '🏀' : '⚾'; }}
+                    />
+                  ) : (
+                    <span className="text-4xl">{listing.sport === 'basketball' ? '🏀' : '⚾'}</span>
+                  )}
+                </div>
+                
+                {/* Card Info */}
+                <div className="flex-1 p-3">
+                  <div className="flex items-start justify-between mb-1">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-bold text-sm truncate">{listing.title || `${listing.player} ${listing.year} ${listing.set}`}</h3>
+                      <p className="text-xs text-gray-400 truncate">{listing.grade}</p>
+                    </div>
+                    <span className={`${getDealScoreColor(listing.dealScore || listing.deal_score)} text-xs font-bold px-2 py-1 rounded-full ml-2 flex-shrink-0`}>
+                      -{listing.dealScore || listing.deal_score}%
+                    </span>
+                  </div>
+                  
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-xs bg-gray-700 px-2 py-0.5 rounded">{listing.platform || 'eBay'}</span>
+                    {listing.sellerRating && (
+                      <span className="text-xs text-gray-500">⭐ {listing.sellerRating}%</span>
+                    )}
+                  </div>
+
+                  <div className="mt-2 flex items-end justify-between">
+                    <div>
+                      <div className="text-lg font-bold text-green-400">${listing.currentPrice || listing.current_price}</div>
+                      <div className="text-xs text-gray-500 line-through">${listing.marketValue || listing.market_value} mkt</div>
+                    </div>
+                    {(listing.isAuction || listing.is_auction) ? (
+                      <div className="text-right">
+                        <div className={`text-sm font-medium ${new Date(listing.auctionEndTime || listing.endTime) - new Date() < 5 * 60 * 1000 ? 'text-red-400' : 'text-orange-400'}`}>
+                          ⏱️ {formatTimeRemaining(listing.auctionEndTime || listing.endTime)}
+                        </div>
+                        <div className="text-xs text-gray-500">{listing.bidCount || listing.bid_count || 0} bids</div>
+                      </div>
+                    ) : (
+                      <div className="text-right">
+                        <span className="text-xs bg-green-600 px-2 py-1 rounded font-medium">BUY NOW</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </a>
+          ))}
+        </div>
+
+        {/* Empty State */}
+        {!loading && filteredListings.length === 0 && (
+          <div className="text-center py-12">
+            <div className="text-4xl mb-4">🔍</div>
+            <p className="text-gray-400">No deals match your filters. Try adjusting them!</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ============================================
+// DEMO DATA GENERATOR (fallback when API unavailable)
+// ============================================
+function generateDemoData() {
+  const players = {
+    basketball: [
+      { name: 'LeBron James', team: 'Lakers' },
+      { name: 'Victor Wembanyama', team: 'Spurs' },
+      { name: 'Luka Doncic', team: 'Mavericks' },
+      { name: 'Anthony Edwards', team: 'Timberwolves' },
+    ],
+    baseball: [
+      { name: 'Shohei Ohtani', team: 'Dodgers' },
+      { name: 'Julio Rodriguez', team: 'Mariners' },
+      { name: 'Gunnar Henderson', team: 'Orioles' },
+    ]
+  };
+
+  const sets = ['Prizm', 'Optic', 'Select', 'Topps Chrome', 'Bowman'];
+  const grades = ['Raw', 'PSA 9', 'PSA 10', 'BGS 9.5'];
+  const years = ['2022', '2023', '2024'];
+  
+  const listings = [];
+  let id = 1;
+  
+  Object.entries(players).forEach(([sport, playerList]) => {
+    playerList.forEach(player => {
+      for (let i = 0; i < 3; i++) {
+        const grade = grades[Math.floor(Math.random() * grades.length)];
+        const year = years[Math.floor(Math.random() * years.length)];
+        const set = sets[Math.floor(Math.random() * sets.length)];
+        const isAuction = Math.random() > 0.5;
+        
+        let baseValue = Math.floor(Math.random() * 400) + 50;
+        if (grade.includes('10')) baseValue *= 2.5;
+        
+        const discount = Math.random() * 0.4 + 0.1;
+        const currentPrice = Math.floor(baseValue * (1 - discount));
+        const marketValue = Math.floor(baseValue);
+        const dealScore = Math.floor((1 - currentPrice / marketValue) * 100);
+        
+        listings.push({
+          id: id++,
+          sport,
+          title: `${year} ${set} ${player.name} #${Math.floor(Math.random() * 300)} ${grade}`,
+          player: player.name,
+          year, set, grade,
+          isAuction,
+          currentPrice,
+          marketValue,
+          dealScore,
+          endTime: isAuction ? new Date(Date.now() + Math.random() * 24 * 60 * 60 * 1000) : null,
+          bidCount: isAuction ? Math.floor(Math.random() * 20) : 0,
+          platform: 'eBay',
+          sellerRating: 98 + Math.random() * 2
+        });
+      }
+    });
+  });
+  
+  return listings.sort((a, b) => b.dealScore - a.dealScore);
+}
+
+export default CardDealFinder;
