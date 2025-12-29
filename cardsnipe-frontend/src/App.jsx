@@ -33,6 +33,22 @@ const api = {
     const response = await fetch(`${API_URL}/api/stats`);
     if (!response.ok) throw new Error('Failed to fetch stats');
     return response.json();
+  },
+
+  async getSettings() {
+    const response = await fetch(`${API_URL}/api/settings`);
+    if (!response.ok) throw new Error('Failed to fetch settings');
+    return response.json();
+  },
+
+  async updateSettings(settings) {
+    const response = await fetch(`${API_URL}/api/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings)
+    });
+    if (!response.ok) throw new Error('Failed to update settings');
+    return response.json();
   }
 };
 
@@ -55,6 +71,8 @@ const CardDealFinder = () => {
   const [lastRefresh, setLastRefresh] = useState(new Date());
   const [isDemo, setIsDemo] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [settings, setSettings] = useState({ maxPrice: 500, minDealScore: 10 });
+  const [showSettings, setShowSettings] = useState(false);
 
   // Fetch deals from API
   const fetchDeals = useCallback(async () => {
@@ -87,6 +105,13 @@ const CardDealFinder = () => {
       setLoading(false);
     }
   }, [filters]);
+
+  // Fetch settings
+  useEffect(() => {
+    api.getSettings().then(res => {
+      if (res.success) setSettings(res.data);
+    }).catch(() => {});
+  }, []);
 
   // Initial load and auto-refresh
   useEffect(() => {
@@ -141,6 +166,18 @@ const CardDealFinder = () => {
     }
   };
 
+  const updateSettings = async (newSettings) => {
+    try {
+      const res = await api.updateSettings(newSettings);
+      if (res.success) {
+        setSettings(res.data);
+        alert('Settings saved! Changes will apply on next scan.');
+      }
+    } catch (err) {
+      alert('Failed to save settings: ' + err.message);
+    }
+  };
+
   const getDealScoreColor = (score) => {
     if (score >= 40) return 'bg-green-500';
     if (score >= 25) return 'bg-yellow-500';
@@ -176,6 +213,12 @@ const CardDealFinder = () => {
               Updated {lastRefresh.toLocaleTimeString()}
             </span>
             <button
+              onClick={() => setShowSettings(!showSettings)}
+              className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg font-medium"
+            >
+              ⚙️ Settings
+            </button>
+            <button
               onClick={clearAllData}
               disabled={clearing}
               className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg font-medium flex items-center gap-2 disabled:opacity-50"
@@ -198,6 +241,44 @@ const CardDealFinder = () => {
           <div className="bg-yellow-900/30 border border-yellow-600 rounded-lg p-3 mb-4 text-sm">
             <strong>Demo Mode:</strong> Backend not connected. Showing sample data. 
             <a href="#setup" className="underline ml-2">Set up your backend →</a>
+          </div>
+        )}
+
+        {/* Settings Panel */}
+        {showSettings && (
+          <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-4">
+            <h3 className="font-bold mb-3">⚙️ Search Settings</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="text-sm text-gray-400">Max Price ($)</label>
+                <input
+                  type="number"
+                  value={settings.maxPrice}
+                  onChange={(e) => setSettings({ ...settings, maxPrice: Number(e.target.value) })}
+                  className="w-full bg-gray-700 rounded-lg px-3 py-2 mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-gray-400">Min Deal Score (%)</label>
+                <input
+                  type="number"
+                  value={settings.minDealScore}
+                  onChange={(e) => setSettings({ ...settings, minDealScore: Number(e.target.value) })}
+                  className="w-full bg-gray-700 rounded-lg px-3 py-2 mt-1"
+                />
+              </div>
+              <div className="flex items-end">
+                <button
+                  onClick={() => updateSettings(settings)}
+                  className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg font-medium w-full"
+                >
+                  Save Settings
+                </button>
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Note: Only PSA 9 and PSA 10 graded cards are searched.
+            </p>
           </div>
         )}
 
