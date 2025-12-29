@@ -460,7 +460,21 @@ const CardDealFinder = () => {
                   <div className="mt-2 flex items-end justify-between">
                     <div>
                       <div className="text-lg font-bold text-green-400">${listing.currentPrice || listing.current_price}</div>
-                      <div className="text-xs text-gray-500 line-through">${listing.marketValue || listing.market_value} mkt</div>
+                      {(listing.marketValue || listing.market_value) ? (
+                        <a
+                          href={listing.market_value_url || '#'}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-xs text-gray-500 line-through hover:text-blue-400"
+                          title={`Source: ${listing.market_value_source || 'unknown'}${listing.market_value_date ? ' - ' + new Date(listing.market_value_date).toLocaleDateString() : ''}`}
+                        >
+                          ${listing.marketValue || listing.market_value} mkt
+                          {listing.market_value_source && <span className="ml-1 text-gray-600">({listing.market_value_source})</span>}
+                        </a>
+                      ) : (
+                        <div className="text-xs text-gray-500">Unknown mkt</div>
+                      )}
                     </div>
                     {(listing.isAuction || listing.is_auction) ? (
                       <div className="text-right">
