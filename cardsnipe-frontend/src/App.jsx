@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 // ============================================
 // CONFIGURATION - Update this after deployment!
 // ============================================
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_URL = 'https://web-production-5c18.up.railway.app';
 
 // ============================================
 // API CLIENT
