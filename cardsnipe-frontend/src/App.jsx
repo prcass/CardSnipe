@@ -71,7 +71,7 @@ const CardDealFinder = () => {
   const [lastRefresh, setLastRefresh] = useState(new Date());
   const [isDemo, setIsDemo] = useState(false);
   const [clearing, setClearing] = useState(false);
-  const [settings, setSettings] = useState({ maxPrice: 500, minDealScore: 10 });
+  const [settings, setSettings] = useState({ minPrice: 0, maxPrice: 500, minDealScore: 10 });
   const [showSettings, setShowSettings] = useState(false);
 
   // Fetch deals from API
@@ -335,6 +335,33 @@ const CardDealFinder = () => {
               <option value="endingSoon">Ending Soon</option>
               <option value="priceLow">Price: Low</option>
             </select>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-4">
+            <span className="text-sm text-gray-400">Price Range:</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">$</span>
+              <input
+                type="number"
+                value={settings.minPrice}
+                onChange={(e) => setSettings({ ...settings, minPrice: Number(e.target.value) })}
+                placeholder="Min"
+                className="w-20 bg-gray-700 rounded px-2 py-1 text-sm"
+              />
+              <span className="text-gray-500">-</span>
+              <input
+                type="number"
+                value={settings.maxPrice}
+                onChange={(e) => setSettings({ ...settings, maxPrice: Number(e.target.value) })}
+                placeholder="Max"
+                className="w-20 bg-gray-700 rounded px-2 py-1 text-sm"
+              />
+              <button
+                onClick={() => updateSettings(settings)}
+                className="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm font-medium"
+              >
+                Apply
+              </button>
+            </div>
           </div>
           <div className="mt-3 flex items-center gap-4">
             <span className="text-sm text-gray-400">Min Deal Score:</span>
