@@ -23,6 +23,12 @@ const api = {
     return response.json();
   },
   
+  async clearData() {
+    const response = await fetch(API_URL + "/api/clear-data", { method: "DELETE" });
+    if (!response.ok) throw new Error('Failed to clear data');
+    return response.json();
+  },
+  
   async getStats() {
     const response = await fetch(`${API_URL}/api/stats`);
     if (!response.ok) throw new Error('Failed to fetch stats');
@@ -48,6 +54,7 @@ const CardDealFinder = () => {
   });
   const [lastRefresh, setLastRefresh] = useState(new Date());
   const [isDemo, setIsDemo] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   // Fetch deals from API
   const fetchDeals = useCallback(async () => {
@@ -120,6 +127,20 @@ const CardDealFinder = () => {
     return `${seconds}s`;
   };
 
+  const clearAllData = async () => {
+    if (!window.confirm('Are you sure you want to clear all data from the database?')) return;
+    try {
+      setClearing(true);
+      const result = await api.clearData();
+      alert('Cleared ' + result.deleted + ' listings from database');
+      fetchDeals();
+    } catch (err) {
+      alert('Failed to clear data: ' + err.message);
+    } finally {
+      setClearing(false);
+    }
+  };
+
   const getDealScoreColor = (score) => {
     if (score >= 40) return 'bg-green-500';
     if (score >= 25) return 'bg-yellow-500';
@@ -154,6 +175,13 @@ const CardDealFinder = () => {
             <span className="text-xs text-gray-500">
               Updated {lastRefresh.toLocaleTimeString()}
             </span>
+            <button
+              onClick={clearAllData}
+              disabled={clearing}
+              className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg font-medium flex items-center gap-2 disabled:opacity-50"
+            >
+              {clearing ? 'Clearing...' : 'Clear Data'}
+            </button>
             <button
               onClick={fetchDeals}
               disabled={loading}
@@ -303,11 +331,11 @@ const CardDealFinder = () => {
                 </div>
                 
                 {/* Card Info */}
-                <div className="flex-1 p-3">
-                  <div className="flex items-start justify-between mb-1">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-bold text-sm truncate">{listing.title || `${listing.player} ${listing.year} ${listing.set}`}</h3>
-                      <p className="text-xs text-gray-400 truncate">{listing.grade}</p>
+                <div className="flex-1 p-3 min-w-0">
+                  <div className="flex items-start gap-2 mb-1">
+                    <div className="flex-1 min-w-0 overflow-hidden">
+                      <h3 className="font-bold text-sm leading-tight break-words" style={{display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden'}}>{listing.title || `${listing.player} ${listing.year} ${listing.set}`}</h3>
+                      <p className="text-xs text-gray-400 mt-0.5">{listing.grade}</p>
                     </div>
                     <span className={`${getDealScoreColor(listing.dealScore || listing.deal_score)} text-xs font-bold px-2 py-1 rounded-full ml-2 flex-shrink-0`}>
                       -{listing.dealScore || listing.deal_score}%
