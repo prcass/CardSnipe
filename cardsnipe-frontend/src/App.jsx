@@ -200,10 +200,11 @@ const CardDealFinder = () => {
     if (showPlayers) {
       api.getPlayers().then(res => {
         if (res.success) setPlayers(res.data);
-      }).catch(() => {});
+      }).catch((err) => console.error('Failed to fetch players:', err));
       api.getTeams().then(res => {
+        console.log('Teams response:', res);
         if (res.success) setTeams(res.data);
-      }).catch(() => {});
+      }).catch((err) => console.error('Failed to fetch teams:', err));
     }
   }, [showPlayers]);
 
