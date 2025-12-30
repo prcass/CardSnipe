@@ -162,6 +162,7 @@ const CardDealFinder = () => {
   const [selectedImport, setSelectedImport] = useState({ sport: 'basketball', team: '' });
   const [importing, setImporting] = useState(false);
   const [scanCount, setScanCount] = useState(0);
+  const [scanStartTime, setScanStartTime] = useState(null);
   const [showScanLog, setShowScanLog] = useState(false);
   const [scanLog, setScanLog] = useState([]);
   const [scanLogFilter, setScanLogFilter] = useState('rejected');
@@ -210,7 +211,12 @@ const CardDealFinder = () => {
   useEffect(() => {
     const fetchScanCount = () => {
       api.getScanCount().then(res => {
-        if (res.success) setScanCount(res.data.total);
+        if (res.success) {
+          setScanCount(res.data.total);
+          if (res.data.lastReset) {
+            setScanStartTime(new Date(res.data.lastReset));
+          }
+        }
       }).catch(() => {});
     };
     fetchScanCount();
@@ -348,6 +354,7 @@ const CardDealFinder = () => {
       setClearing(true);
       const result = await api.clearData();
       setScanCount(0); // Reset scan counter display
+      setScanStartTime(new Date()); // Reset scan start time
       alert('Cleared ' + result.deleted + ' listings from database');
       fetchDeals();
     } catch (err) {
@@ -396,6 +403,15 @@ const CardDealFinder = () => {
     }
   };
 
+  // Calculate scan rate (cards per second)
+  const getScanRate = () => {
+    if (!scanStartTime || scanCount === 0) return '0.00';
+    const elapsedSeconds = (Date.now() - scanStartTime.getTime()) / 1000;
+    if (elapsedSeconds < 1) return '0.00';
+    const rate = scanCount / elapsedSeconds;
+    return rate.toFixed(2);
+  };
+
   const getDealScoreColor = (score) => {
     if (score >= 40) return 'bg-green-500';
     if (score >= 25) return 'bg-yellow-500';
@@ -435,6 +451,10 @@ const CardDealFinder = () => {
               <div className="text-lg font-bold text-blue-400">{scanCount.toLocaleString()}</div>
               <div className="text-xs text-gray-500">Cards Scanned</div>
             </button>
+            <div className="bg-gray-800 px-3 py-1.5 rounded-lg text-center">
+              <div className="text-lg font-bold text-green-400">{getScanRate()}</div>
+              <div className="text-xs text-gray-500">Cards/sec</div>
+            </div>
             <span className="text-xs text-gray-500">
               Updated {lastRefresh.toLocaleTimeString()}
             </span>
