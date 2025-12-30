@@ -106,6 +106,22 @@ const api = {
     });
     if (!response.ok) throw new Error('Failed to delete player');
     return response.json();
+  },
+
+  async getTeams() {
+    const response = await fetch(`${API_URL}/api/teams`);
+    if (!response.ok) throw new Error('Failed to fetch teams');
+    return response.json();
+  },
+
+  async importTeam(sport, team) {
+    const response = await fetch(`${API_URL}/api/players/import-team`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sport, team })
+    });
+    if (!response.ok) throw new Error('Failed to import team');
+    return response.json();
   }
 };
 
@@ -128,7 +144,7 @@ const CardDealFinder = () => {
   const [lastRefresh, setLastRefresh] = useState(new Date());
   const [isDemo, setIsDemo] = useState(false);
   const [clearing, setClearing] = useState(false);
-  const [settings, setSettings] = useState({ minPrice: 0, maxPrice: 500, minDealScore: 10 });
+  const [settings, setSettings] = useState({ minPrice: 0, maxPrice: 500, minDealScore: 10, cardYear: null });
   const [showSettings, setShowSettings] = useState(false);
   const [reportModal, setReportModal] = useState({ open: false, listing: null });
   const [reportForm, setReportForm] = useState({ issue: 'wrong_parallel', notes: '' });
@@ -136,6 +152,9 @@ const CardDealFinder = () => {
   const [players, setPlayers] = useState([]);
   const [newPlayer, setNewPlayer] = useState({ name: '', sport: 'basketball' });
   const [showPlayers, setShowPlayers] = useState(false);
+  const [teams, setTeams] = useState({ basketball: [], baseball: [], football: [] });
+  const [selectedImport, setSelectedImport] = useState({ sport: 'basketball', team: '' });
+  const [importing, setImporting] = useState(false);
 
   // Fetch deals from API
   const fetchDeals = useCallback(async () => {
@@ -176,11 +195,14 @@ const CardDealFinder = () => {
     }).catch(() => {});
   }, []);
 
-  // Fetch players when panel opens
+  // Fetch players and teams when panel opens
   useEffect(() => {
     if (showPlayers) {
       api.getPlayers().then(res => {
         if (res.success) setPlayers(res.data);
+      }).catch(() => {});
+      api.getTeams().then(res => {
+        if (res.success) setTeams(res.data);
       }).catch(() => {});
     }
   }, [showPlayers]);
@@ -216,6 +238,25 @@ const CardDealFinder = () => {
       setPlayers(players.filter(p => p.id !== id));
     } catch (err) {
       alert(err.message);
+    }
+  };
+
+  const importTeam = async () => {
+    if (!selectedImport.team) return;
+    try {
+      setImporting(true);
+      const res = await api.importTeam(selectedImport.sport, selectedImport.team);
+      if (res.success) {
+        alert(res.message);
+        // Refresh players list
+        const playersRes = await api.getPlayers();
+        if (playersRes.success) setPlayers(playersRes.data);
+        setSelectedImport({ ...selectedImport, team: '' });
+      }
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -387,7 +428,24 @@ const CardDealFinder = () => {
         {showSettings && (
           <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-4">
             <h3 className="font-bold mb-3">⚙️ Search Settings</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <label className="text-sm text-gray-400">Card Year</label>
+                <select
+                  value={settings.cardYear || ''}
+                  onChange={(e) => setSettings({ ...settings, cardYear: e.target.value ? Number(e.target.value) : null })}
+                  className="w-full bg-gray-700 rounded-lg px-3 py-2 mt-1"
+                >
+                  <option value="">All Years</option>
+                  <option value="2024">2024</option>
+                  <option value="2023">2023</option>
+                  <option value="2022">2022</option>
+                  <option value="2021">2021</option>
+                  <option value="2020">2020</option>
+                  <option value="2019">2019</option>
+                  <option value="2018">2018</option>
+                </select>
+              </div>
               <div>
                 <label className="text-sm text-gray-400">Max Price ($)</label>
                 <input
@@ -450,6 +508,36 @@ const CardDealFinder = () => {
                 className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg font-medium"
               >
                 Add
+              </button>
+            </div>
+
+            {/* Import Team */}
+            <div className="flex gap-2 mb-4 pb-4 border-b border-gray-700">
+              <select
+                value={selectedImport.sport}
+                onChange={(e) => setSelectedImport({ sport: e.target.value, team: '' })}
+                className="bg-gray-700 rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="basketball">NBA</option>
+                <option value="baseball">MLB</option>
+                <option value="football">NFL</option>
+              </select>
+              <select
+                value={selectedImport.team}
+                onChange={(e) => setSelectedImport({ ...selectedImport, team: e.target.value })}
+                className="flex-1 bg-gray-700 rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="">Select a team...</option>
+                {teams[selectedImport.sport]?.map(team => (
+                  <option key={team} value={team}>{team}</option>
+                ))}
+              </select>
+              <button
+                onClick={importTeam}
+                disabled={!selectedImport.team || importing}
+                className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium disabled:opacity-50"
+              >
+                {importing ? 'Importing...' : 'Import Team'}
               </button>
             </div>
 

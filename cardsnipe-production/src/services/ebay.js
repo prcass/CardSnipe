@@ -154,27 +154,204 @@ export class EbayClient {
   // ============================================
 
   transformListings(items) {
-    return items.map(item => ({
-      ebayItemId: item.itemId,
-      title: item.title,
-      currentPrice: parseFloat(item.price?.value || 0),
-      currency: item.price?.currency || 'USD',
-      isAuction: item.buyingOptions?.includes('AUCTION') || false,
-      auctionEndTime: item.itemEndDate ? new Date(item.itemEndDate) : null,
-      bidCount: item.bidCount || 0,
-      imageUrl: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl,
-      listingUrl: item.itemWebUrl,
-      condition: item.condition,
-      sellerName: item.seller?.username,
-      sellerRating: item.seller?.feedbackPercentage,
-      sellerFeedbackCount: item.seller?.feedbackScore,
-      location: item.itemLocation?.postalCode,
-      shippingCost: item.shippingOptions?.[0]?.shippingCost?.value || null,
-      watchCount: item.watchCount || 0,
-      
-      // We'll parse these from the title
-      ...this.parseCardDetails(item.title)
-    }));
+    return items.map(item => {
+      // Extract structured data from eBay's localizedAspects (item specifics)
+      const aspects = this.extractAspects(item.localizedAspects || []);
+
+      // Log cert-related aspects for debugging
+      this.logAspects(item.localizedAspects, item.title);
+
+      // ALWAYS parse title for parallel detection (eBay aspects often have generic "Blue" instead of "Blue Velocity")
+      // Also parse for other fields if aspects are missing
+      const parsedFromTitle = this.parseCardDetails(item.title);
+
+      return {
+        ebayItemId: item.itemId,
+        title: item.title,
+        currentPrice: parseFloat(item.price?.value || 0),
+        currency: item.price?.currency || 'USD',
+        isAuction: item.buyingOptions?.includes('AUCTION') || false,
+        auctionEndTime: item.itemEndDate ? new Date(item.itemEndDate) : null,
+        bidCount: item.bidCount || 0,
+        imageUrl: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl,
+        listingUrl: item.itemWebUrl,
+        condition: item.condition,
+        sellerName: item.seller?.username,
+        sellerRating: item.seller?.feedbackPercentage,
+        sellerFeedbackCount: item.seller?.feedbackScore,
+        location: item.itemLocation?.postalCode,
+        shippingCost: item.shippingOptions?.[0]?.shippingCost?.value || null,
+        watchCount: item.watchCount || 0,
+
+        // Prefer structured eBay aspects, fall back to parsed title
+        year: aspects.year || parsedFromTitle.year,
+        setName: aspects.setName || parsedFromTitle.setName,
+        cardNumber: aspects.cardNumber || parsedFromTitle.cardNumber,
+        // For parallel: prefer the MORE SPECIFIC name (title often has "Blue Velocity" while aspects just say "Blue")
+        parallel: this.getBetterParallel(aspects.parallel, parsedFromTitle.parallel),
+        playerName: aspects.playerName || parsedFromTitle.playerName,
+        grader: aspects.grader || parsedFromTitle.grader,
+        grade: aspects.grade || parsedFromTitle.grade,
+        certNumber: aspects.certNumber || this.extractCertFromTitle(item.title),  // PSA cert for API lookup
+        sport: aspects.sport || parsedFromTitle.sport,
+        isAuto: aspects.isAuto || parsedFromTitle.isAuto || false,
+      };
+    });
+  }
+
+  /**
+   * Choose the more specific parallel name between aspects and title parsing
+   * eBay aspects might say "Blue" while title has "Blue Velocity" - prefer the longer/more specific one
+   */
+  getBetterParallel(aspectsParallel, titleParallel) {
+    if (!aspectsParallel && !titleParallel) return null;
+    if (!aspectsParallel) return titleParallel;
+    if (!titleParallel) return aspectsParallel;
+
+    const aspectsLower = aspectsParallel.toLowerCase();
+    const titleLower = titleParallel.toLowerCase();
+
+    // If title parallel contains the aspect parallel, title is more specific
+    // e.g., aspects="blue", title="blue velocity" → use "blue velocity"
+    if (titleLower.includes(aspectsLower) && titleLower.length > aspectsLower.length) {
+      return titleParallel;
+    }
+
+    // If aspect parallel contains the title parallel, aspect is more specific
+    if (aspectsLower.includes(titleLower) && aspectsLower.length > titleLower.length) {
+      return aspectsParallel;
+    }
+
+    // If they're different (not substrings of each other), prefer title parsing
+    // because it uses our curated list of compound parallels
+    if (titleLower !== aspectsLower) {
+      return titleParallel;
+    }
+
+    return aspectsParallel;
+  }
+
+  /**
+   * Extract PSA cert number from listing title
+   * PSA certs are typically 8-10 digit numbers
+   */
+  extractCertFromTitle(title) {
+    if (!title) return null;
+
+    // Look for patterns like "Cert #12345678" or "PSA 10 #12345678" or standalone 8-10 digit numbers
+    const patterns = [
+      /cert[#:\s]*(\d{7,10})/i,
+      /psa[^0-9]*(\d{7,10})/i,
+      /#(\d{8,10})\b/,
+    ];
+
+    for (const pattern of patterns) {
+      const match = title.match(pattern);
+      if (match && match[1]) {
+        // Verify it looks like a cert (not a card number which is usually 1-4 digits)
+        const num = match[1];
+        if (num.length >= 7) {
+          return num;
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Log available aspects for debugging (first few listings only)
+   */
+  logAspects(aspects, title) {
+    if (!aspects || aspects.length === 0) return;
+    // Find cert-related aspects
+    const certAspects = aspects.filter(a =>
+      a.name.toLowerCase().includes('cert') ||
+      a.name.toLowerCase().includes('psa') ||
+      a.name.toLowerCase().includes('grading')
+    );
+    if (certAspects.length > 0) {
+      console.log(`  eBay aspects with cert/psa/grading: ${certAspects.map(a => `${a.name}=${a.value}`).join(', ')}`);
+    }
+  }
+
+  /**
+   * Extract structured data from eBay's localizedAspects
+   * These are seller-provided item specifics - much more reliable than title parsing
+   */
+  extractAspects(localizedAspects) {
+    const result = {
+      year: null,
+      setName: null,
+      cardNumber: null,
+      parallel: null,
+      playerName: null,
+      grader: null,
+      grade: null,
+      certNumber: null,  // PSA/BGS certification number for API lookup
+      sport: null,
+      isAuto: false,
+    };
+
+    for (const aspect of localizedAspects) {
+      const name = (aspect.name || '').toLowerCase();
+      const value = aspect.value || '';
+
+      // Year/Season
+      if (name === 'year' || name === 'season' || name === 'year manufactured') {
+        const yearMatch = value.match(/\b(19[89]\d|20[0-2]\d)\b/);
+        if (yearMatch) result.year = parseInt(yearMatch[1]);
+      }
+      // Set/Series
+      else if (name === 'set' || name === 'series' || name === 'product') {
+        result.setName = value;
+      }
+      // Card Number
+      else if (name === 'card number' || name === 'card #') {
+        result.cardNumber = value.replace(/^#/, '').trim();
+      }
+      // Parallel/Variation
+      else if (name === 'parallel/variety' || name === 'parallel' || name === 'variation' || name === 'insert') {
+        result.parallel = value.toLowerCase();
+      }
+      // Player/Athlete
+      else if (name === 'player' || name === 'athlete' || name === 'player/athlete') {
+        result.playerName = value;
+      }
+      // Grading Company
+      else if (name === 'professional grader' || name === 'grader' || name === 'grading company') {
+        result.grader = value.toUpperCase();
+      }
+      // Grade
+      else if (name === 'grade') {
+        result.grade = value;
+      }
+      // Certification Number (PSA cert # for API lookup)
+      else if (name === 'certification number' || name === 'cert number' || name === 'psa certification number' ||
+               name === 'certification' || name === 'psa #' || name === 'psa number' ||
+               name === 'grading certification number' || name === 'cert #') {
+        // Extract just the numeric part (PSA certs are 8-10 digits)
+        const certMatch = value.match(/\d{7,10}/);
+        if (certMatch) {
+          result.certNumber = certMatch[0];
+        }
+      }
+      // Sport
+      else if (name === 'sport') {
+        result.sport = value.toLowerCase();
+      }
+      // Autograph
+      else if (name === 'autograph' || name === 'autographed') {
+        result.isAuto = value.toLowerCase() === 'yes' || value.toLowerCase() === 'true';
+      }
+      // Features (may include autograph info)
+      else if (name === 'features') {
+        if (value.toLowerCase().includes('auto')) {
+          result.isAuto = true;
+        }
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -229,26 +406,81 @@ export class EbayClient {
       result.sport = 'baseball';
     }
 
-    // Extract card number
-    const numberMatch = title.match(/#\s*(\d+)/);
-    if (numberMatch) result.cardNumber = numberMatch[1];
-
-    // Detect parallels
-    const parallels = ['SILVER', 'GOLD', 'RED', 'BLUE', 'GREEN', 'ORANGE', 'PURPLE', 'BLACK', 'PINK', 
-                       'SHIMMER', 'HOLO', 'REFRACTOR', 'MOJO', 'SCOPE', 'WAVE'];
-    for (const parallel of parallels) {
-      if (titleUpper.includes(parallel)) {
-        result.parallel = parallel.charAt(0) + parallel.slice(1).toLowerCase();
+    // Extract card number - try multiple patterns
+    const cardNumPatterns = [
+      /#\s*(\d{1,4})\b/,           // #129, # 129
+      /\bNo\.?\s*(\d{1,4})\b/i,    // No. 129, No 129
+      /\bCard\s*#?(\d{1,4})\b/i,   // Card #129, Card 129
+      /\s(\d{1,4})\/\d+\b/,        // 129/500 (numbered cards)
+    ];
+    for (const pattern of cardNumPatterns) {
+      const match = title.match(pattern);
+      if (match && match[1]) {
+        result.cardNumber = match[1];
         break;
       }
     }
 
-    // Detect set names
-    const sets = ['PRIZM', 'OPTIC', 'SELECT', 'MOSAIC', 'HOOPS', 'CONTENDERS', 'CHRONICLES',
-                  'TOPPS CHROME', 'BOWMAN CHROME', 'BOWMAN', 'STADIUM CLUB', 'DONRUSS'];
-    for (const set of sets) {
-      if (titleUpper.includes(set)) {
-        result.setName = set.split(' ').map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ');
+    // Detect parallels - IMPORTANT: Check multi-word parallels FIRST before single colors
+    const parallels = [
+      // Multi-word parallels (must check first)
+      'RED/WHITE/BLUE', 'RED WHITE BLUE', 'RED, WHITE, BLUE',
+      'BLUE VELOCITY', 'RED VELOCITY', 'GREEN VELOCITY', 'ORANGE VELOCITY', 'PURPLE VELOCITY',
+      'BLUE PULSAR', 'GREEN PULSAR', 'RED PULSAR', 'ORANGE PULSAR', 'PURPLE PULSAR',
+      'PINK ICE', 'RED ICE', 'BLUE ICE', 'GREEN ICE', 'PURPLE ICE',
+      'FAST BREAK', 'BLACK GOLD', 'BLUE SHIMMER', 'GOLD SHIMMER', 'RED SHIMMER',
+      'BLUE WAVE', 'RED WAVE', 'GOLD WAVE', 'HYPER BLUE', 'HYPER PINK', 'HYPER RED',
+      'NEON GREEN', 'NEON ORANGE', 'NEON PINK', 'TIGER CAMO',
+      // Single-word parallels (check after compound names)
+      'SILVER', 'GOLD', 'BLUE', 'RED', 'GREEN', 'ORANGE', 'PURPLE', 'BLACK', 'PINK', 'WHITE',
+      'SHIMMER', 'HOLO', 'REFRACTOR', 'MOJO', 'SCOPE', 'WAVE', 'PULSAR', 'HYPER',
+      'DISCO', 'TIGER', 'CAMO', 'ICE', 'NEON', 'LASER', 'VELOCITY', 'PRIZM'
+    ];
+    for (const parallel of parallels) {
+      if (titleUpper.includes(parallel)) {
+        // Normalize RWB variants
+        if (parallel.includes('RED') && parallel.includes('WHITE') && parallel.includes('BLUE')) {
+          result.parallel = 'red white blue';
+        } else {
+          result.parallel = parallel.toLowerCase();
+        }
+        break;
+      }
+    }
+
+    // Detect set names - use patterns to avoid matching parallels like "Pulsar Prizm"
+    // Check specific insert sets FIRST, then base sets
+    const setPatterns = [
+      // Specific Prizm insert sets (must check before base "Prizm")
+      { pattern: /PRIZM\s+GLOBAL\s+REACH/i, name: 'Prizm Global Reach' },
+      { pattern: /PRIZM\s+DRAFT\s+PICKS/i, name: 'Prizm Draft Picks' },
+      { pattern: /PRIZM\s+INSTANT\s+IMPACT/i, name: 'Prizm Instant Impact' },
+      { pattern: /PRIZM\s+EMERGENT/i, name: 'Prizm Emergent' },
+      { pattern: /PRIZM\s+SENSATIONAL/i, name: 'Prizm Sensational' },
+      // Other specific sets
+      { pattern: /HOOPS\s*PREMIUM\s*STOCK/i, name: 'Hoops Premium Stock' },
+      { pattern: /TOPPS\s*CHROME/i, name: 'Topps Chrome' },
+      { pattern: /BOWMAN\s*CHROME/i, name: 'Bowman Chrome' },
+      { pattern: /STADIUM\s*CLUB/i, name: 'Stadium Club' },
+      // Base sets - year + set name pattern (e.g., "2023 Prizm")
+      { pattern: /\b20\d{2}[-\s]+PRIZM\b/i, name: 'Prizm' },
+      { pattern: /\b20\d{2}[-\s]+OPTIC\b/i, name: 'Optic' },
+      { pattern: /\b20\d{2}[-\s]+SELECT\b/i, name: 'Select' },
+      { pattern: /\b20\d{2}[-\s]+MOSAIC\b/i, name: 'Mosaic' },
+      { pattern: /PANINI\s+PRIZM\b/i, name: 'Prizm' },
+      { pattern: /PANINI\s+OPTIC/i, name: 'Optic' },
+      { pattern: /DONRUSS\s+OPTIC/i, name: 'Optic' },
+      { pattern: /PANINI\s+SELECT/i, name: 'Select' },
+      { pattern: /PANINI\s+MOSAIC/i, name: 'Mosaic' },
+      { pattern: /PANINI\s+CONTENDERS/i, name: 'Contenders' },
+      { pattern: /PANINI\s+CHRONICLES/i, name: 'Chronicles' },
+      { pattern: /\bHOOPS\b/i, name: 'Hoops' },
+      { pattern: /\bDONRUSS\b/i, name: 'Donruss' },
+      { pattern: /\bBOWMAN\b/i, name: 'Bowman' },
+    ];
+    for (const { pattern, name } of setPatterns) {
+      if (pattern.test(title)) {
+        result.setName = name;
         break;
       }
     }
