@@ -49,6 +49,26 @@ const api = {
     });
     if (!response.ok) throw new Error('Failed to update settings');
     return response.json();
+  },
+
+  async reportIssue(report) {
+    const response = await fetch(`${API_URL}/api/report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(report)
+    });
+    if (!response.ok) throw new Error('Failed to submit report');
+    return response.json();
+  },
+
+  async getScanLog(filters = {}) {
+    const params = new URLSearchParams();
+    if (filters.outcome) params.append('outcome', filters.outcome);
+    if (filters.sport) params.append('sport', filters.sport);
+    params.append('limit', filters.limit || 100);
+    const response = await fetch(`${API_URL}/api/scan-log?${params}`);
+    if (!response.ok) throw new Error('Failed to fetch scan log');
+    return response.json();
   }
 };
 
@@ -73,6 +93,9 @@ const CardDealFinder = () => {
   const [clearing, setClearing] = useState(false);
   const [settings, setSettings] = useState({ minPrice: 0, maxPrice: 500, minDealScore: 10 });
   const [showSettings, setShowSettings] = useState(false);
+  const [reportModal, setReportModal] = useState({ open: false, listing: null });
+  const [reportForm, setReportForm] = useState({ issue: 'wrong_parallel', notes: '' });
+  const [submittingReport, setSubmittingReport] = useState(false);
 
   // Fetch deals from API
   const fetchDeals = useCallback(async () => {
@@ -175,6 +198,33 @@ const CardDealFinder = () => {
       }
     } catch (err) {
       alert('Failed to save settings: ' + err.message);
+    }
+  };
+
+  const openReportModal = (listing, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setReportModal({ open: true, listing });
+    setReportForm({ issue: 'wrong_parallel', notes: '' });
+  };
+
+  const submitReport = async () => {
+    if (!reportModal.listing) return;
+    try {
+      setSubmittingReport(true);
+      await api.reportIssue({
+        listingId: reportModal.listing.id,
+        ebayUrl: reportModal.listing.listingUrl || reportModal.listing.listing_url,
+        scpUrl: reportModal.listing.market_value_url,
+        issue: reportForm.issue,
+        notes: reportForm.notes
+      });
+      alert('Report submitted! Thank you for helping improve accuracy.');
+      setReportModal({ open: false, listing: null });
+    } catch (err) {
+      alert('Failed to submit report: ' + err.message);
+    } finally {
+      setSubmittingReport(false);
     }
   };
 
@@ -476,18 +526,25 @@ const CardDealFinder = () => {
                         <div className="text-xs text-gray-500">Unknown mkt</div>
                       )}
                     </div>
-                    {(listing.isAuction || listing.is_auction) ? (
-                      <div className="text-right">
-                        <div className={`text-sm font-medium ${new Date(listing.auctionEndTime || listing.endTime) - new Date() < 5 * 60 * 1000 ? 'text-red-400' : 'text-orange-400'}`}>
-                          ⏱️ {formatTimeRemaining(listing.auctionEndTime || listing.endTime)}
-                        </div>
-                        <div className="text-xs text-gray-500">{listing.bidCount || listing.bid_count || 0} bids</div>
-                      </div>
-                    ) : (
-                      <div className="text-right">
+                    <div className="text-right flex flex-col items-end gap-1">
+                      {(listing.isAuction || listing.is_auction) ? (
+                        <>
+                          <div className={`text-sm font-medium ${new Date(listing.auctionEndTime || listing.endTime) - new Date() < 5 * 60 * 1000 ? 'text-red-400' : 'text-orange-400'}`}>
+                            ⏱️ {formatTimeRemaining(listing.auctionEndTime || listing.endTime)}
+                          </div>
+                          <div className="text-xs text-gray-500">{listing.bidCount || listing.bid_count || 0} bids</div>
+                        </>
+                      ) : (
                         <span className="text-xs bg-green-600 px-2 py-1 rounded font-medium">BUY NOW</span>
-                      </div>
-                    )}
+                      )}
+                      <button
+                        onClick={(e) => openReportModal(listing, e)}
+                        className="text-xs text-gray-500 hover:text-red-400 hover:bg-gray-700 px-2 py-0.5 rounded transition-colors"
+                        title="Report incorrect match"
+                      >
+                        Report
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -500,6 +557,60 @@ const CardDealFinder = () => {
           <div className="text-center py-12">
             <div className="text-4xl mb-4">🔍</div>
             <p className="text-gray-400">No deals match your filters. Try adjusting them!</p>
+          </div>
+        )}
+
+        {/* Report Modal */}
+        {reportModal.open && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setReportModal({ open: false, listing: null })}>
+            <div className="bg-gray-800 rounded-xl p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-lg font-bold mb-4">Report Incorrect Match</h3>
+              <p className="text-sm text-gray-400 mb-4 truncate" title={reportModal.listing?.title}>
+                {reportModal.listing?.title}
+              </p>
+
+              <div className="mb-4">
+                <label className="text-sm text-gray-400 block mb-2">Issue Type</label>
+                <select
+                  value={reportForm.issue}
+                  onChange={(e) => setReportForm({ ...reportForm, issue: e.target.value })}
+                  className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="wrong_parallel">Wrong Parallel Match</option>
+                  <option value="wrong_price">Wrong Market Price</option>
+                  <option value="wrong_year">Wrong Year Match</option>
+                  <option value="wrong_player">Wrong Player</option>
+                  <option value="wrong_set">Wrong Set/Insert</option>
+                  <option value="other">Other Issue</option>
+                </select>
+              </div>
+
+              <div className="mb-4">
+                <label className="text-sm text-gray-400 block mb-2">Notes (optional)</label>
+                <textarea
+                  value={reportForm.notes}
+                  onChange={(e) => setReportForm({ ...reportForm, notes: e.target.value })}
+                  placeholder="Describe the issue..."
+                  className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm h-24 resize-none"
+                />
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setReportModal({ open: false, listing: null })}
+                  className="flex-1 bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={submitReport}
+                  disabled={submittingReport}
+                  className="flex-1 bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg font-medium disabled:opacity-50"
+                >
+                  {submittingReport ? 'Submitting...' : 'Submit Report'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
