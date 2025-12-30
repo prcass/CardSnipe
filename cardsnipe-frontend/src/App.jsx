@@ -122,6 +122,12 @@ const api = {
     });
     if (!response.ok) throw new Error('Failed to import team');
     return response.json();
+  },
+
+  async getScanCount() {
+    const response = await fetch(`${API_URL}/api/scan-count`);
+    if (!response.ok) throw new Error('Failed to fetch scan count');
+    return response.json();
   }
 };
 
@@ -155,6 +161,7 @@ const CardDealFinder = () => {
   const [teams, setTeams] = useState({ basketball: [], baseball: [] });
   const [selectedImport, setSelectedImport] = useState({ sport: 'basketball', team: '' });
   const [importing, setImporting] = useState(false);
+  const [scanCount, setScanCount] = useState(0);
 
   // Fetch deals from API
   const fetchDeals = useCallback(async () => {
@@ -193,6 +200,18 @@ const CardDealFinder = () => {
     api.getSettings().then(res => {
       if (res.success) setSettings(res.data);
     }).catch(() => {});
+  }, []);
+
+  // Poll scan count every 5 seconds
+  useEffect(() => {
+    const fetchScanCount = () => {
+      api.getScanCount().then(res => {
+        if (res.success) setScanCount(res.data.total);
+      }).catch(() => {});
+    };
+    fetchScanCount();
+    const interval = setInterval(fetchScanCount, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   // Fetch players and teams when panel opens
@@ -305,6 +324,7 @@ const CardDealFinder = () => {
     try {
       setClearing(true);
       const result = await api.clearData();
+      setScanCount(0); // Reset scan counter display
       alert('Cleared ' + result.deleted + ' listings from database');
       fetchDeals();
     } catch (err) {
@@ -384,6 +404,10 @@ const CardDealFinder = () => {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <div className="bg-gray-800 px-3 py-1.5 rounded-lg text-center">
+              <div className="text-lg font-bold text-blue-400">{scanCount.toLocaleString()}</div>
+              <div className="text-xs text-gray-500">Cards Scanned</div>
+            </div>
             <span className="text-xs text-gray-500">
               Updated {lastRefresh.toLocaleTimeString()}
             </span>
