@@ -162,6 +162,10 @@ const CardDealFinder = () => {
   const [selectedImport, setSelectedImport] = useState({ sport: 'basketball', team: '' });
   const [importing, setImporting] = useState(false);
   const [scanCount, setScanCount] = useState(0);
+  const [showScanLog, setShowScanLog] = useState(false);
+  const [scanLog, setScanLog] = useState([]);
+  const [scanLogFilter, setScanLogFilter] = useState('rejected');
+  const [scanLogSort, setScanLogSort] = useState({ field: 'scanned_at', dir: 'desc' });
 
   // Fetch deals from API
   const fetchDeals = useCallback(async () => {
@@ -213,6 +217,25 @@ const CardDealFinder = () => {
     const interval = setInterval(fetchScanCount, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  // Fetch scan log when modal opens or filter changes
+  useEffect(() => {
+    if (showScanLog) {
+      api.getScanLog({ outcome: scanLogFilter, limit: 200 }).then(res => {
+        if (res.success) setScanLog(res.data);
+      }).catch(() => {});
+    }
+  }, [showScanLog, scanLogFilter]);
+
+  // Sort scan log
+  const sortedScanLog = [...scanLog].sort((a, b) => {
+    const aVal = a[scanLogSort.field];
+    const bVal = b[scanLogSort.field];
+    if (scanLogSort.dir === 'asc') {
+      return aVal > bVal ? 1 : -1;
+    }
+    return aVal < bVal ? 1 : -1;
+  });
 
   // Fetch players and teams when panel opens
   useEffect(() => {
@@ -404,10 +427,14 @@ const CardDealFinder = () => {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <div className="bg-gray-800 px-3 py-1.5 rounded-lg text-center">
+            <button
+              onClick={() => setShowScanLog(true)}
+              className="bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg text-center transition-colors"
+              title="Click to view scan log"
+            >
               <div className="text-lg font-bold text-blue-400">{scanCount.toLocaleString()}</div>
               <div className="text-xs text-gray-500">Cards Scanned</div>
-            </div>
+            </button>
             <span className="text-xs text-gray-500">
               Updated {lastRefresh.toLocaleTimeString()}
             </span>
@@ -894,6 +921,107 @@ const CardDealFinder = () => {
                 >
                   {submittingReport ? 'Submitting...' : 'Submit Report'}
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Scan Log Modal */}
+        {showScanLog && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setShowScanLog(false)}>
+            <div className="bg-gray-800 rounded-xl p-6 max-w-5xl w-full max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-bold">Scan Log - {scanLog.length} entries</h3>
+                <button onClick={() => setShowScanLog(false)} className="text-gray-400 hover:text-white text-xl">&times;</button>
+              </div>
+
+              {/* Filters */}
+              <div className="flex gap-3 mb-4">
+                <select
+                  value={scanLogFilter}
+                  onChange={(e) => setScanLogFilter(e.target.value)}
+                  className="bg-gray-700 rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="rejected">Rejected Only</option>
+                  <option value="saved">Saved (Deals)</option>
+                  <option value="all">All Scans</option>
+                </select>
+              </div>
+
+              {/* Table */}
+              <div className="overflow-auto flex-1">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-700 sticky top-0">
+                    <tr>
+                      <th
+                        className="px-3 py-2 text-left cursor-pointer hover:bg-gray-600"
+                        onClick={() => setScanLogSort({ field: 'title', dir: scanLogSort.field === 'title' && scanLogSort.dir === 'asc' ? 'desc' : 'asc' })}
+                      >
+                        Card {scanLogSort.field === 'title' && (scanLogSort.dir === 'asc' ? '▲' : '▼')}
+                      </th>
+                      <th
+                        className="px-3 py-2 text-left cursor-pointer hover:bg-gray-600"
+                        onClick={() => setScanLogSort({ field: 'price', dir: scanLogSort.field === 'price' && scanLogSort.dir === 'asc' ? 'desc' : 'asc' })}
+                      >
+                        Price {scanLogSort.field === 'price' && (scanLogSort.dir === 'asc' ? '▲' : '▼')}
+                      </th>
+                      <th
+                        className="px-3 py-2 text-left cursor-pointer hover:bg-gray-600"
+                        onClick={() => setScanLogSort({ field: 'outcome', dir: scanLogSort.field === 'outcome' && scanLogSort.dir === 'asc' ? 'desc' : 'asc' })}
+                      >
+                        Outcome {scanLogSort.field === 'outcome' && (scanLogSort.dir === 'asc' ? '▲' : '▼')}
+                      </th>
+                      <th
+                        className="px-3 py-2 text-left cursor-pointer hover:bg-gray-600"
+                        onClick={() => setScanLogSort({ field: 'reject_reason', dir: scanLogSort.field === 'reject_reason' && scanLogSort.dir === 'asc' ? 'desc' : 'asc' })}
+                      >
+                        Reason {scanLogSort.field === 'reject_reason' && (scanLogSort.dir === 'asc' ? '▲' : '▼')}
+                      </th>
+                      <th
+                        className="px-3 py-2 text-left cursor-pointer hover:bg-gray-600"
+                        onClick={() => setScanLogSort({ field: 'scanned_at', dir: scanLogSort.field === 'scanned_at' && scanLogSort.dir === 'asc' ? 'desc' : 'asc' })}
+                      >
+                        Time {scanLogSort.field === 'scanned_at' && (scanLogSort.dir === 'asc' ? '▲' : '▼')}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedScanLog.map((log, i) => (
+                      <tr key={log.id || i} className="border-t border-gray-700 hover:bg-gray-700/50">
+                        <td className="px-3 py-2">
+                          <a
+                            href={log.listing_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-400 hover:underline block max-w-xs truncate"
+                            title={log.title}
+                          >
+                            {log.title?.substring(0, 50) || 'Unknown'}
+                          </a>
+                          <span className="text-xs text-gray-500">{log.platform} • {log.sport}</span>
+                        </td>
+                        <td className="px-3 py-2">${log.price}</td>
+                        <td className="px-3 py-2">
+                          <span className={`px-2 py-0.5 rounded text-xs ${
+                            log.outcome === 'saved' ? 'bg-green-600' :
+                            log.outcome === 'matched' ? 'bg-blue-600' : 'bg-gray-600'
+                          }`}>
+                            {log.outcome}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-gray-400 max-w-xs truncate" title={log.reject_reason}>
+                          {log.reject_reason || '-'}
+                        </td>
+                        <td className="px-3 py-2 text-gray-400 text-xs">
+                          {log.scanned_at ? new Date(log.scanned_at).toLocaleString() : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {scanLog.length === 0 && (
+                  <div className="text-center py-8 text-gray-500">No scan logs found</div>
+                )}
               </div>
             </div>
           </div>
