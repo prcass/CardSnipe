@@ -152,7 +152,7 @@ const CardDealFinder = () => {
   const [players, setPlayers] = useState([]);
   const [newPlayer, setNewPlayer] = useState({ name: '', sport: 'basketball' });
   const [showPlayers, setShowPlayers] = useState(false);
-  const [teams, setTeams] = useState({ basketball: [], baseball: [], football: [] });
+  const [teams, setTeams] = useState({ basketball: [], baseball: [] });
   const [selectedImport, setSelectedImport] = useState({ sport: 'basketball', team: '' });
   const [importing, setImporting] = useState(false);
 
@@ -502,7 +502,6 @@ const CardDealFinder = () => {
               >
                 <option value="basketball">Basketball</option>
                 <option value="baseball">Baseball</option>
-                <option value="football">Football</option>
               </select>
               <button
                 onClick={addPlayer}
@@ -521,7 +520,6 @@ const CardDealFinder = () => {
               >
                 <option value="basketball">NBA</option>
                 <option value="baseball">MLB</option>
-                <option value="football">NFL</option>
               </select>
               <select
                 value={selectedImport.team}
@@ -543,13 +541,13 @@ const CardDealFinder = () => {
             </div>
 
             {/* Players List by Sport */}
-            {['basketball', 'baseball', 'football'].map(sport => {
+            {['basketball', 'baseball'].map(sport => {
               const sportPlayers = players.filter(p => p.sport === sport);
               if (sportPlayers.length === 0) return null;
               return (
                 <div key={sport} className="mb-3">
                   <h4 className="text-sm font-medium text-gray-400 mb-2 capitalize">
-                    {sport === 'basketball' ? '🏀' : sport === 'baseball' ? '⚾' : '🏈'} {sport}
+                    {sport === 'basketball' ? '🏀' : '⚾'} {sport}
                   </h4>
                   <div className="flex flex-wrap gap-2">
                     {sportPlayers.map(player => (
