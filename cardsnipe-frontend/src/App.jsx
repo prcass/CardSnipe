@@ -69,6 +69,43 @@ const api = {
     const response = await fetch(`${API_URL}/api/scan-log?${params}`);
     if (!response.ok) throw new Error('Failed to fetch scan log');
     return response.json();
+  },
+
+  async getPlayers() {
+    const response = await fetch(`${API_URL}/api/players`);
+    if (!response.ok) throw new Error('Failed to fetch players');
+    return response.json();
+  },
+
+  async addPlayer(name, sport) {
+    const response = await fetch(`${API_URL}/api/players`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, sport })
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Failed to add player');
+    }
+    return response.json();
+  },
+
+  async togglePlayer(id, active) {
+    const response = await fetch(`${API_URL}/api/players/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active })
+    });
+    if (!response.ok) throw new Error('Failed to update player');
+    return response.json();
+  },
+
+  async deletePlayer(id) {
+    const response = await fetch(`${API_URL}/api/players/${id}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) throw new Error('Failed to delete player');
+    return response.json();
   }
 };
 
@@ -96,6 +133,9 @@ const CardDealFinder = () => {
   const [reportModal, setReportModal] = useState({ open: false, listing: null });
   const [reportForm, setReportForm] = useState({ issue: 'wrong_parallel', notes: '' });
   const [submittingReport, setSubmittingReport] = useState(false);
+  const [players, setPlayers] = useState([]);
+  const [newPlayer, setNewPlayer] = useState({ name: '', sport: 'basketball' });
+  const [showPlayers, setShowPlayers] = useState(false);
 
   // Fetch deals from API
   const fetchDeals = useCallback(async () => {
@@ -135,6 +175,49 @@ const CardDealFinder = () => {
       if (res.success) setSettings(res.data);
     }).catch(() => {});
   }, []);
+
+  // Fetch players when panel opens
+  useEffect(() => {
+    if (showPlayers) {
+      api.getPlayers().then(res => {
+        if (res.success) setPlayers(res.data);
+      }).catch(() => {});
+    }
+  }, [showPlayers]);
+
+  const addPlayer = async () => {
+    if (!newPlayer.name.trim()) return;
+    try {
+      const res = await api.addPlayer(newPlayer.name, newPlayer.sport);
+      if (res.success) {
+        setPlayers([...players, res.data]);
+        setNewPlayer({ name: '', sport: newPlayer.sport });
+      }
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const togglePlayer = async (id, active) => {
+    try {
+      const res = await api.togglePlayer(id, active);
+      if (res.success) {
+        setPlayers(players.map(p => p.id === id ? res.data : p));
+      }
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const deletePlayer = async (id) => {
+    if (!window.confirm('Remove this player from monitoring?')) return;
+    try {
+      await api.deletePlayer(id);
+      setPlayers(players.filter(p => p.id !== id));
+    } catch (err) {
+      alert(err.message);
+    }
+  };
 
   // Initial load and auto-refresh
   useEffect(() => {
@@ -263,6 +346,12 @@ const CardDealFinder = () => {
               Updated {lastRefresh.toLocaleTimeString()}
             </span>
             <button
+              onClick={() => setShowPlayers(!showPlayers)}
+              className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg font-medium"
+            >
+              👤 Players
+            </button>
+            <button
               onClick={() => setShowSettings(!showSettings)}
               className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg font-medium"
             >
@@ -328,6 +417,91 @@ const CardDealFinder = () => {
             </div>
             <p className="text-xs text-gray-500 mt-2">
               Note: Only PSA 9 and PSA 10 graded cards are searched.
+            </p>
+          </div>
+        )}
+
+        {/* Players Panel */}
+        {showPlayers && (
+          <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-4">
+            <h3 className="font-bold mb-3">👤 Monitored Players</h3>
+
+            {/* Add New Player Form */}
+            <div className="flex gap-2 mb-4">
+              <input
+                type="text"
+                placeholder="Player name..."
+                value={newPlayer.name}
+                onChange={(e) => setNewPlayer({ ...newPlayer, name: e.target.value })}
+                onKeyDown={(e) => e.key === 'Enter' && addPlayer()}
+                className="flex-1 bg-gray-700 rounded-lg px-3 py-2 text-sm"
+              />
+              <select
+                value={newPlayer.sport}
+                onChange={(e) => setNewPlayer({ ...newPlayer, sport: e.target.value })}
+                className="bg-gray-700 rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="basketball">Basketball</option>
+                <option value="baseball">Baseball</option>
+                <option value="football">Football</option>
+              </select>
+              <button
+                onClick={addPlayer}
+                className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg font-medium"
+              >
+                Add
+              </button>
+            </div>
+
+            {/* Players List by Sport */}
+            {['basketball', 'baseball', 'football'].map(sport => {
+              const sportPlayers = players.filter(p => p.sport === sport);
+              if (sportPlayers.length === 0) return null;
+              return (
+                <div key={sport} className="mb-3">
+                  <h4 className="text-sm font-medium text-gray-400 mb-2 capitalize">
+                    {sport === 'basketball' ? '🏀' : sport === 'baseball' ? '⚾' : '🏈'} {sport}
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {sportPlayers.map(player => (
+                      <div
+                        key={player.id}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm ${
+                          player.active ? 'bg-gray-700' : 'bg-gray-700/50 text-gray-500'
+                        }`}
+                      >
+                        <span className={player.active ? '' : 'line-through'}>{player.name}</span>
+                        <button
+                          onClick={() => togglePlayer(player.id, !player.active)}
+                          className={`text-xs px-1.5 py-0.5 rounded ${
+                            player.active
+                              ? 'bg-green-600/30 text-green-400 hover:bg-green-600/50'
+                              : 'bg-gray-600/30 text-gray-400 hover:bg-gray-600/50'
+                          }`}
+                          title={player.active ? 'Click to disable' : 'Click to enable'}
+                        >
+                          {player.active ? 'ON' : 'OFF'}
+                        </button>
+                        <button
+                          onClick={() => deletePlayer(player.id)}
+                          className="text-xs text-gray-500 hover:text-red-400"
+                          title="Remove player"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+
+            {players.length === 0 && (
+              <p className="text-sm text-gray-500">No players configured. Add some above!</p>
+            )}
+
+            <p className="text-xs text-gray-500 mt-3">
+              The scanner will search eBay and COMC for PSA 9/10 cards of active players.
             </p>
           </div>
         )}
