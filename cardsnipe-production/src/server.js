@@ -33,9 +33,16 @@ app.use(express.json());
 const ebay = new EbayClient();
 const pricing = new PriceService();
 
+const API_VERSION = '1.0.6';
+
 // ============================================
 // REST API ENDPOINTS
 // ============================================
+
+// Version check
+app.get('/api/version', (req, res) => {
+  res.json({ version: API_VERSION });
+});
 
 // Get all current deals with filters
 app.get('/api/deals', async (req, res) => {

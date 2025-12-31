@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 // ============================================
 // CONFIGURATION - Update this after deployment!
 // ============================================
-const APP_VERSION = '1.0.5';
+const APP_VERSION = '1.0.6';
 const API_URL = 'https://web-production-5c18.up.railway.app';
 
 // ============================================
@@ -356,11 +356,19 @@ const CardDealFinder = () => {
     try {
       setUploading(true);
       const res = await api.uploadPriceData(file, uploadingSport);
-      if (res.success) {
-        alert(`Uploaded ${res.data.imported} prices from ${file.name}`);
+      console.log('Upload response:', res);
+      if (res.success && res.data) {
+        alert(`Uploaded ${res.data.imported || 0} prices from ${file.name}`);
         // Refresh stats
         const statsRes = await api.getPriceDataStats();
         if (statsRes.success) setPriceDataStats(statsRes.data);
+      } else if (res.success) {
+        // Old response format fallback
+        alert(`Upload successful for ${file.name}`);
+        const statsRes = await api.getPriceDataStats();
+        if (statsRes.success) setPriceDataStats(statsRes.data);
+      } else {
+        alert('Upload failed: ' + (res.error || 'Unknown error'));
       }
     } catch (err) {
       alert('Upload failed: ' + err.message);
