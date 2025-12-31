@@ -302,12 +302,14 @@ app.post('/api/price-data/upload', upload.single('file'), async (req, res) => {
     const sport = req.body.sport || 'basketball';
     const sourceFile = req.file.originalname;
 
-    // Parse CSV
+    // Parse CSV (supports both comma and tab delimited)
     const csvContent = req.file.buffer.toString('utf-8');
+    const delimiter = csvContent.includes('\t') ? '\t' : ',';
     const records = parse(csvContent, {
       columns: true,
       skip_empty_lines: true,
-      relaxColumnCount: true
+      relaxColumnCount: true,
+      delimiter: delimiter
     });
 
     console.log(`Parsing ${records.length} records from ${sourceFile}`);
