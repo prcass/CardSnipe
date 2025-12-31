@@ -33,7 +33,7 @@ app.use(express.json());
 const ebay = new EbayClient();
 const pricing = new PriceService();
 
-const API_VERSION = '1.0.6';
+const API_VERSION = '1.0.7';
 
 // ============================================
 // REST API ENDPOINTS
@@ -390,13 +390,18 @@ app.get('/api/price-data/stats', async (req, res) => {
       .count('* as count')
       .groupBy('sport');
 
-    const bySet = await db('price_data')
-      .select('sport', 'set_name', 'year')
-      .count('* as count')
-      .groupBy('sport', 'set_name', 'year')
-      .orderBy([{ column: 'sport' }, { column: 'year', order: 'desc' }]);
+    // Build response in format frontend expects
+    let total = 0;
+    let basketball = 0;
+    let baseball = 0;
+    for (const row of stats) {
+      const count = parseInt(row.count) || 0;
+      total += count;
+      if (row.sport === 'basketball') basketball = count;
+      if (row.sport === 'baseball') baseball = count;
+    }
 
-    res.json({ success: true, bySport: stats, bySet });
+    res.json({ success: true, data: { total, basketball, baseball } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

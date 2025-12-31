@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 // ============================================
 // CONFIGURATION - Update this after deployment!
 // ============================================
-const APP_VERSION = '1.0.6';
+const APP_VERSION = '1.0.7';
 const API_URL = 'https://web-production-5c18.up.railway.app';
 
 // ============================================
