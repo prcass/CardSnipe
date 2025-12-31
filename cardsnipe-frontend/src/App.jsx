@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 // ============================================
 // CONFIGURATION - Update this after deployment!
 // ============================================
+const APP_VERSION = '1.0.5';
 const API_URL = 'https://web-production-5c18.up.railway.app';
 
 // ============================================
@@ -510,6 +511,7 @@ const CardDealFinder = () => {
               <span className={`text-sm font-normal px-2 py-1 rounded-full ${isDemo ? 'bg-yellow-600' : 'bg-green-600'}`}>
                 {isDemo ? 'DEMO' : 'LIVE'}
               </span>
+              <span className="text-xs font-normal text-gray-500">v{APP_VERSION}</span>
             </h1>
             <p className="text-gray-400 text-sm mt-1">
               Real-time undervalued card finder • {filteredListings.length} deals found
