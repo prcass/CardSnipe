@@ -123,7 +123,20 @@ export class EbayClient {
     }
 
     const data = await response.json();
-    return this.transformListings(data.itemSummaries || []);
+    const allListings = this.transformListings(data.itemSummaries || []);
+
+    // Filter to only PSA 9 and PSA 10 graded cards
+    return allListings.filter(listing => this.isPSA9or10(listing));
+  }
+
+  /**
+   * Check if a listing is PSA 9 or PSA 10
+   */
+  isPSA9or10(listing) {
+    const title = (listing.title || '').toUpperCase();
+    const grade = (listing.grade || '').toUpperCase();
+    return title.includes('PSA 10') || title.includes('PSA 9') ||
+           grade.includes('PSA 10') || grade.includes('PSA 9');
   }
 
   /**
@@ -158,9 +171,6 @@ export class EbayClient {
       // Extract structured data from eBay's localizedAspects (item specifics)
       const aspects = this.extractAspects(item.localizedAspects || []);
 
-      // Log cert-related aspects for debugging
-      this.logAspects(item.localizedAspects, item.title);
-
       // ALWAYS parse title for parallel detection (eBay aspects often have generic "Blue" instead of "Blue Velocity")
       // Also parse for other fields if aspects are missing
       const parsedFromTitle = this.parseCardDetails(item.title);
@@ -192,7 +202,6 @@ export class EbayClient {
         playerName: aspects.playerName || parsedFromTitle.playerName,
         grader: aspects.grader || parsedFromTitle.grader,
         grade: aspects.grade || parsedFromTitle.grade,
-        certNumber: aspects.certNumber || this.extractCertFromTitle(item.title),  // PSA cert for API lookup
         sport: aspects.sport || parsedFromTitle.sport,
         isAuto: aspects.isAuto || parsedFromTitle.isAuto || false,
       };
@@ -232,49 +241,6 @@ export class EbayClient {
   }
 
   /**
-   * Extract PSA cert number from listing title
-   * PSA certs are typically 8-10 digit numbers
-   */
-  extractCertFromTitle(title) {
-    if (!title) return null;
-
-    // Look for patterns like "Cert #12345678" or "PSA 10 #12345678" or standalone 8-10 digit numbers
-    const patterns = [
-      /cert[#:\s]*(\d{7,10})/i,
-      /psa[^0-9]*(\d{7,10})/i,
-      /#(\d{8,10})\b/,
-    ];
-
-    for (const pattern of patterns) {
-      const match = title.match(pattern);
-      if (match && match[1]) {
-        // Verify it looks like a cert (not a card number which is usually 1-4 digits)
-        const num = match[1];
-        if (num.length >= 7) {
-          return num;
-        }
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Log available aspects for debugging (first few listings only)
-   */
-  logAspects(aspects, title) {
-    if (!aspects || aspects.length === 0) return;
-    // Find cert-related aspects
-    const certAspects = aspects.filter(a =>
-      a.name.toLowerCase().includes('cert') ||
-      a.name.toLowerCase().includes('psa') ||
-      a.name.toLowerCase().includes('grading')
-    );
-    if (certAspects.length > 0) {
-      console.log(`  eBay aspects with cert/psa/grading: ${certAspects.map(a => `${a.name}=${a.value}`).join(', ')}`);
-    }
-  }
-
-  /**
    * Extract structured data from eBay's localizedAspects
    * These are seller-provided item specifics - much more reliable than title parsing
    */
@@ -287,7 +253,6 @@ export class EbayClient {
       playerName: null,
       grader: null,
       grade: null,
-      certNumber: null,  // PSA/BGS certification number for API lookup
       sport: null,
       isAuto: false,
     };
@@ -324,16 +289,6 @@ export class EbayClient {
       // Grade
       else if (name === 'grade') {
         result.grade = value;
-      }
-      // Certification Number (PSA cert # for API lookup)
-      else if (name === 'certification number' || name === 'cert number' || name === 'psa certification number' ||
-               name === 'certification' || name === 'psa #' || name === 'psa number' ||
-               name === 'grading certification number' || name === 'cert #') {
-        // Extract just the numeric part (PSA certs are 8-10 digits)
-        const certMatch = value.match(/\d{7,10}/);
-        if (certMatch) {
-          result.certNumber = certMatch[0];
-        }
       }
       // Sport
       else if (name === 'sport') {
@@ -423,18 +378,23 @@ export class EbayClient {
 
     // Detect parallels - IMPORTANT: Check multi-word parallels FIRST before single colors
     const parallels = [
-      // Multi-word parallels (must check first)
+      // Multi-word parallels (must check first - more specific)
       'RED/WHITE/BLUE', 'RED WHITE BLUE', 'RED, WHITE, BLUE',
+      'SILVER PRIZM', 'GOLD PRIZM', 'BLUE PRIZM', 'RED PRIZM', 'GREEN PRIZM',
+      'ORANGE PRIZM', 'PURPLE PRIZM', 'PINK PRIZM', 'BLACK PRIZM',
       'BLUE VELOCITY', 'RED VELOCITY', 'GREEN VELOCITY', 'ORANGE VELOCITY', 'PURPLE VELOCITY',
       'BLUE PULSAR', 'GREEN PULSAR', 'RED PULSAR', 'ORANGE PULSAR', 'PURPLE PULSAR',
-      'PINK ICE', 'RED ICE', 'BLUE ICE', 'GREEN ICE', 'PURPLE ICE',
+      'PINK ICE', 'RED ICE', 'BLUE ICE', 'GREEN ICE', 'PURPLE ICE', 'ORANGE ICE',
       'FAST BREAK', 'BLACK GOLD', 'BLUE SHIMMER', 'GOLD SHIMMER', 'RED SHIMMER',
       'BLUE WAVE', 'RED WAVE', 'GOLD WAVE', 'HYPER BLUE', 'HYPER PINK', 'HYPER RED',
       'NEON GREEN', 'NEON ORANGE', 'NEON PINK', 'TIGER CAMO',
+      'GREEN REFRACTOR', 'BLUE REFRACTOR', 'GOLD REFRACTOR', 'RED REFRACTOR',
+      'CRACKED ICE', 'TIE DYE', 'CHECKERBOARD',
       // Single-word parallels (check after compound names)
-      'SILVER', 'GOLD', 'BLUE', 'RED', 'GREEN', 'ORANGE', 'PURPLE', 'BLACK', 'PINK', 'WHITE',
+      // NOTE: Removed 'PRIZM' - that's usually a set name, not a parallel
+      'SILVER', 'GOLD', 'BRONZE',
       'SHIMMER', 'HOLO', 'REFRACTOR', 'MOJO', 'SCOPE', 'WAVE', 'PULSAR', 'HYPER',
-      'DISCO', 'TIGER', 'CAMO', 'ICE', 'NEON', 'LASER', 'VELOCITY', 'PRIZM'
+      'DISCO', 'TIGER', 'CAMO', 'ICE', 'NEON', 'LASER', 'VELOCITY'
     ];
     for (const parallel of parallels) {
       if (titleUpper.includes(parallel)) {

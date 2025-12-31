@@ -6,24 +6,26 @@
  */
 
 import fetch from 'node-fetch';
-import { PSAClient } from './psa.js';
 import { cardSets } from './card-sets.js';
-
-const psa = new PSAClient();
-const hasPSACredentials = process.env.PSA_ACCESS_TOKEN || (process.env.PSA_USERNAME && process.env.PSA_PASSWORD);
-
-// Log PSA status on startup
-if (hasPSACredentials) {
-  console.log('PSA API: Credentials configured ✓');
-} else {
-  console.log('PSA API: No credentials (set PSA_ACCESS_TOKEN or PSA_USERNAME+PSA_PASSWORD)');
-}
 
 export class SportsCardProClient {
   constructor() {
     // Use sportscardspro.com for sports cards (pricecharting.com is for video games)
     this.baseUrl = 'https://www.sportscardspro.com';
     this.token = process.env.SPORTSCARDPRO_TOKEN;
+
+    // Rate limiting: max 1 request per second to avoid 429 errors
+    this.lastRequestTime = 0;
+    this.minRequestInterval = 1000; // 1 second between requests
+  }
+
+  async rateLimit() {
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+    if (timeSinceLastRequest < this.minRequestInterval) {
+      await new Promise(r => setTimeout(r, this.minRequestInterval - timeSinceLastRequest));
+    }
+    this.lastRequestTime = Date.now();
   }
 
   /**
@@ -64,6 +66,26 @@ export class SportsCardProClient {
     const parallelMatch = productName.match(/\[([^\]]+)\]/);
     if (parallelMatch) {
       result.parallel = parallelMatch[1].toLowerCase().trim();
+    }
+
+    // Also check console name for parallel indicators (e.g., "2012 Panini Prizm Silver")
+    // This catches cases where parallel is in console name, not brackets
+    if (!result.parallel) {
+      const combined = (consoleName + ' ' + productName).toLowerCase();
+      const parallelIndicators = [
+        'silver prizm', 'gold prizm', 'blue prizm', 'red prizm', 'green prizm',
+        'orange prizm', 'purple prizm', 'pink prizm', 'black prizm',
+        'silver', 'gold', 'blue', 'red', 'green', 'orange', 'purple', 'pink', 'black',
+        'holo', 'refractor', 'mojo', 'shimmer', 'ice', 'wave', 'velocity'
+      ];
+      for (const p of parallelIndicators) {
+        // Check if it's actually a parallel marker, not just part of set name
+        // Skip if it's just "Prizm" in "Panini Prizm" (set name)
+        if (combined.includes(p) && !combined.match(new RegExp(`panini\\s+${p}\\b`))) {
+          result.parallel = p;
+          break;
+        }
+      }
     }
 
     // Extract insert set from console name using CardSets data service
@@ -108,6 +130,9 @@ export class SportsCardProClient {
     if (!this.token) {
       throw new Error('SPORTSCARDPRO_TOKEN not configured');
     }
+
+    // Rate limit to avoid 429 errors
+    await this.rateLimit();
 
     // Simple query - just the player name
     // API uses OR matching so extra keywords cause false matches
@@ -252,88 +277,17 @@ export class SportsCardProClient {
    * Get market value for a card
    * Searches by title and returns appropriate graded price
    */
-  async getMarketValue({ player, year, set, grade, cardNumber, parallel, imageUrl, sport, certNumber }) {
-    let searchYear = year;
-    let searchSet = set;
-    let searchNumber = cardNumber;
-    let searchPlayer = player;
-    let searchGrade = grade;
-    let searchParallel = parallel || null;  // Use passed parallel if provided
-    let searchIsAuto = false;
-    let searchInsertSet = null;  // Insert sets like Splash, Rainmakers, All-Stars
+  async getMarketValue({ player, year, set, grade, cardNumber, parallel, imageUrl, sport }) {
+    // Player name is now passed directly from the scanner (e.g., "Joel Embiid")
+    const searchYear = year;
+    const searchSet = set;
+    const searchNumber = cardNumber;
+    const searchGrade = grade;
+    const searchParallel = parallel || null;
+    const searchIsAuto = false;  // TODO: detect from eBay aspects if needed
+    const searchInsertSet = null;  // TODO: detect from eBay aspects if needed
     const searchSport = sport;
-
-    // PRIORITY: If we have a PSA cert number, look it up for EXACT structured data
-    if (hasPSACredentials && !certNumber) {
-      // Log when we have credentials but no cert - helps debug extraction issues
-      console.log(`  PSA: No cert# found in listing`);
-    }
-    if (certNumber && hasPSACredentials) {
-      try {
-        console.log(`  PSA: Looking up cert #${certNumber}`);
-        const psaData = await psa.getCertInfo(certNumber);
-
-        if (psaData && psaData.PSACert) {
-          const cert = psaData.PSACert;
-          console.log(`  PSA: ${cert.Year} ${cert.Brand} ${cert.Subject} #${cert.CardNumber} [${cert.Variety || 'Base'}]`);
-
-          // Use PSA's structured data - much more reliable than title parsing!
-          if (cert.Year) searchYear = cert.Year;
-          if (cert.Brand) searchSet = cert.Brand;
-          if (cert.CardNumber) searchNumber = cert.CardNumber;
-          if (cert.Subject) searchPlayer = cert.Subject;
-          if (cert.CardGrade) searchGrade = `PSA ${cert.CardGrade}`;
-          if (cert.Variety) {
-            // PSA Variety field contains parallel info (e.g., "Blue Wave Prizm", "Silver")
-            searchParallel = cert.Variety.toLowerCase();
-          }
-          // Check if it's an auto from PSA data
-          if (cert.Category && cert.Category.toLowerCase().includes('auto')) {
-            searchIsAuto = true;
-          }
-        } else {
-          console.log(`  PSA: Cert #${certNumber} not found in database`);
-        }
-      } catch (e) {
-        console.log(`  PSA: Lookup failed - ${e.message}`);
-        // Fall back to title parsing
-      }
-    }
-
-    // Extract grade from title if not provided
-    if (!searchGrade && player) {
-      const titleUpper = player.toUpperCase();
-      if (titleUpper.includes("PSA 10") || titleUpper.includes("GEM MINT")) {
-        searchGrade = "PSA 10";
-      } else if (titleUpper.includes("PSA 9")) {
-        searchGrade = "PSA 9";
-      } else if (titleUpper.includes("BGS 10")) {
-        searchGrade = "BGS 10";
-      } else if (titleUpper.includes("BGS 9")) {
-        searchGrade = "BGS 9";
-      }
-    }
-
-    // Parse title for player name, auto status, and insert set (fallback if PSA lookup didn't populate)
-    if (player && player.length > 30) {
-      const parsed = this.parseTitle(player);
-      if (!searchYear && parsed.year) searchYear = parsed.year;
-      if (!searchSet && parsed.set) searchSet = parsed.set;
-      if (parsed.player) searchPlayer = parsed.player;
-      if (parsed.isAuto) searchIsAuto = parsed.isAuto;
-      if (parsed.insertSet) searchInsertSet = parsed.insertSet;
-    }
-
-    // Extract clean player name from known list
-    const players = ['LeBron James', 'Victor Wembanyama', 'Luka Doncic', 'Anthony Edwards',
-      'Stephen Curry', 'Shohei Ohtani', 'Mike Trout', 'Julio Rodriguez', 'Gunnar Henderson', 'Juan Soto'];
-    let cleanPlayer = searchPlayer;
-    for (const p of players) {
-      if (player && player.toLowerCase().includes(p.toLowerCase())) {
-        cleanPlayer = p;
-        break;
-      }
-    }
+    const cleanPlayer = player;  // Already clean from scanner
 
     // REQUIRED: Must have card number, year, and set to search
     if (!searchNumber) {
@@ -388,14 +342,13 @@ export class SportsCardProClient {
         const yearMatch = String(searchYear) === String(scpData.year);
         const setMatch = searchSet.toLowerCase() === (scpData.set || '').toLowerCase();
 
-        // Parallel matching: be STRICT to avoid false matches
-        // "Orange Prizm" is different from "Orange" - do NOT strip suffixes!
+        // Parallel matching: flexible for color + suffix variations
         const normalizeParallel = (p) => {
           if (!p) return '';
           return p.toLowerCase().trim();
         };
 
-        // Simple color names (can use flexible matching with these only)
+        // Simple color names that can match with prizm/refractor suffixes
         const simpleColors = ['silver', 'gold', 'blue', 'red', 'green', 'orange', 'purple', 'pink', 'black', 'white', 'bronze', 'yellow'];
 
         const searchParNorm = normalizeParallel(searchParallel);
@@ -403,25 +356,29 @@ export class SportsCardProClient {
 
         // Parallel match logic:
         // - Base card (no parallel) should ONLY match base card
-        // - Complex parallels (Fast Break, Velocity, Holo, etc.) require EXACT match
-        // - Simple colors can match with prizm/refractor suffix variations
+        // - "silver" matches "silver prizm" (color + common suffix)
+        // - "silver prizm" matches "silver" (color + common suffix)
+        // - "fast break" should NOT match "fast break purple" (different parallel)
         let parallelMatch;
         if (!searchParNorm && !scpParNorm) {
           parallelMatch = true;  // Both are base cards
         } else if (!searchParNorm || !scpParNorm) {
           parallelMatch = false;  // One is base, one is parallel - no match
         } else if (searchParNorm === scpParNorm) {
-          parallelMatch = true;  // Exact match after normalization
-        } else if (simpleColors.includes(searchParNorm) && scpParNorm.endsWith(searchParNorm)) {
-          // Allow "purple" to match "purple" in "fast break purple" only if search is simple color
-          // BUT this is risky - "purple" should NOT match "fast break purple"
-          // Only allow if SCP is just the color with common suffix
-          parallelMatch = simpleColors.includes(scpParNorm) || scpParNorm === searchParNorm;
-        } else if (simpleColors.includes(scpParNorm) && searchParNorm.endsWith(scpParNorm)) {
-          parallelMatch = simpleColors.includes(searchParNorm) || searchParNorm === scpParNorm;
+          parallelMatch = true;  // Exact match
         } else {
-          // Complex parallels must match exactly
-          parallelMatch = false;
+          // Check if one starts with the other (e.g., "silver" vs "silver prizm")
+          const searchStartsWithScp = searchParNorm.startsWith(scpParNorm);
+          const scpStartsWithSearch = scpParNorm.startsWith(searchParNorm);
+
+          if (searchStartsWithScp || scpStartsWithSearch) {
+            // One is a prefix of the other - likely same parallel with different naming
+            // e.g., "silver" vs "silver prizm", "green" vs "green refractor"
+            parallelMatch = true;
+          } else {
+            // Completely different parallels
+            parallelMatch = false;
+          }
         }
 
         const autoMatch = searchIsAuto === scpData.isAuto;
