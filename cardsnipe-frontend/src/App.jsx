@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 // ============================================
 // CONFIGURATION - Update this after deployment!
 // ============================================
-const APP_VERSION = '1.0.8';
+const APP_VERSION = '1.0.9';
 const API_URL = 'https://web-production-5c18.up.railway.app';
 
 // ============================================
@@ -439,10 +439,13 @@ const CardDealFinder = () => {
       setScanStartTime(new Date()); // Reset scan start time
       setListings([]); // Immediately clear displayed listings
       setStats(null); // Clear stats
-      alert('Cleared ' + (result.deleted || 0) + ' listings from database');
-      fetchDeals(); // Refresh from server
+      setIsDemo(false); // Ensure not in demo mode
+      alert('Cleared ' + (result.deleted || 0) + ' listings. Refreshing...');
+      // Wait a moment then refresh
+      setTimeout(() => fetchDeals(), 500);
     } catch (err) {
       alert('Failed to clear data: ' + err.message);
+      setListings([]); // Still clear on error
     } finally {
       setClearing(false);
     }
