@@ -69,10 +69,12 @@ async function getMonitoredPlayers() {
 
 function buildQueries(player) {
   // Simplified queries for speed - just PSA 10 and PSA 9
-  const year = settings.cardYear ? settings.cardYear + ' ' : '';
+  // Currently only have 2024 Prizm local pricing data
+  const year = settings.cardYear ? settings.cardYear + ' ' : '2024 ';
+  const set = 'Prizm ';
   return [
-    year + player + ' PSA 10',
-    year + player + ' PSA 9'
+    year + set + player + ' PSA 10',
+    year + set + player + ' PSA 9'
   ];
 }
 
