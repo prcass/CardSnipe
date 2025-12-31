@@ -9,14 +9,17 @@ import { EbayClient } from './services/ebay.js';
 import { COMCClient } from './services/comc.js';
 import { Scraper130Point } from './services/scraper130point.js';
 import { PriceService } from './services/pricing.js';
+import { LocalPricingService } from './services/local-pricing.js';
 import { db } from './db/index.js';
 
 const ebay = new EbayClient();
 const comc = new COMCClient();
 const scraper130 = new Scraper130Point();
 const pricing = new PriceService();
+const localPricing = new LocalPricingService();
 
 const hasEbayKeys = process.env.EBAY_CLIENT_ID && process.env.EBAY_CLIENT_SECRET;
+let useLocalPricing = false;  // Will be set on startup
 
 // Default settings (can be overridden via API)
 let settings = {
@@ -65,33 +68,45 @@ async function getMonitoredPlayers() {
 }
 
 function buildQueries(player) {
-  // Only search for PSA 9 and PSA 10 graded cards
+  // Simplified queries for speed - just PSA 10 and PSA 9
   const year = settings.cardYear ? settings.cardYear + ' ' : '';
   return [
     year + player + ' PSA 10',
-    year + player + ' PSA 9',
-    year + player + ' Prizm PSA 10',
-    year + player + ' Prizm PSA 9'
+    year + player + ' PSA 9'
   ];
 }
 
-async function getMarketValue(listing, sport) {
-  // Use parsed card details from eBay client for exact matching
+async function getMarketValue(listing, sport, playerName) {
   try {
-    const result = await pricing.getMarketValue({
-      player: listing.title,  // Full title for player name extraction
-      year: listing.year,
-      set: listing.setName,  // Use setName from eBay parser (not 'set')
-      grade: listing.grade,
-      cardNumber: listing.cardNumber,  // Card # is KEY for matching
-      parallel: listing.parallel,  // Color/variant must match
-      imageUrl: listing.imageUrl,
-      certNumber: listing.certNumber,  // PSA cert # for API lookup (most reliable!)
-      sport: sport  // For category filtering (basketball, baseball, football)
-    });
-    // Return null if unknown - don't estimate
+    let result;
+
+    // Use local pricing if available (much faster, no rate limits!)
+    if (useLocalPricing) {
+      result = await localPricing.getMarketValue({
+        year: listing.year,
+        set: listing.setName,
+        grade: listing.grade,
+        cardNumber: listing.cardNumber,
+        parallel: listing.parallel,
+        sport: sport
+      });
+    } else {
+      // Fall back to API-based pricing
+      result = await pricing.getMarketValue({
+        player: playerName,
+        year: listing.year,
+        set: listing.setName,
+        grade: listing.grade,
+        cardNumber: listing.cardNumber,
+        parallel: listing.parallel,
+        imageUrl: listing.imageUrl,
+        sport: sport
+      });
+    }
+
+    // Return error reason if no market value found
     if (!result || result.source === 'unknown' || !result.marketValue) {
-      return null;
+      return { error: result?.error || 'unknown' };
     }
     // Return full result with source info
     return {
@@ -101,8 +116,7 @@ async function getMarketValue(listing, sport) {
       date: result.lastUpdated
     };
   } catch (e) {
-    console.log('  Price lookup failed: ' + e.message);
-    return null;
+    return { error: e.message };
   }
 }
 
@@ -161,60 +175,58 @@ function shortCard(listing) {
 
 // Increment scan counter on server
 async function incrementScanCount(count) {
+  if (count <= 0) return;
   try {
     const serverUrl = process.env.SERVER_URL || 'http://localhost:3001';
-    await fetch(serverUrl + '/api/scan-count/increment', {
+    console.log(`  [Scan count +${count}] → ${serverUrl}`);
+    const resp = await fetch(serverUrl + '/api/scan-count/increment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ count })
     });
+    if (!resp.ok) {
+      console.log(`  [Scan count error: ${resp.status}]`);
+    }
   } catch (e) {
-    // Silent fail
+    console.log(`  [Scan count failed: ${e.message}]`);
   }
 }
 
-async function processListings(listings, sport, platform) {
-  // Increment scan count for all listings checked
-  await incrementScanCount(listings.length);
-
-  // Filter to only PSA 9 and 10
-  const psa9or10 = listings.filter(isPSA9or10);
-  const notPSA = listings.filter(l => !isPSA9or10(l));
-
-  // Silently log non-PSA 9/10 as rejected (don't spam console)
-  for (const listing of notPSA) {
-    await logScan(listing, sport, platform, 'rejected', 'not PSA 9 or 10', null, null);
-  }
+async function processListings(listings, sport, platform, playerName) {
+  // Listings are already filtered to PSA 9/10 by the eBay client
 
   // Filter by price range
-  const inPriceRange = psa9or10.filter(l => l.currentPrice >= settings.minPrice && l.currentPrice <= settings.maxPrice);
-  const outOfRange = psa9or10.filter(l => l.currentPrice < settings.minPrice || l.currentPrice > settings.maxPrice);
+  const inPriceRange = listings.filter(l => l.currentPrice >= settings.minPrice && l.currentPrice <= settings.maxPrice);
 
-  // Silently log out-of-range as rejected
-  for (const listing of outOfRange) {
-    await logScan(listing, sport, platform, 'rejected', `price $${listing.currentPrice} outside range`, null, null);
-  }
+  // Skip cards missing essential info (no card # = can't match)
+  const matchable = inPriceRange.filter(l => l.cardNumber && l.setName);
+  const skipped = inPriceRange.length - matchable.length;
 
+  console.log(`  [${platform}] ${listings.length} cards → ${matchable.length} matchable (${skipped} missing card#/set)`);
+
+  // Increment scan count
+  incrementScanCount(matchable.length);  // Don't await - fire and forget for speed
+
+  // Process cards sequentially to respect SportsCardPro rate limits
   let saved = 0;
-  for (const listing of inPriceRange) {
+
+  for (const listing of matchable) {
     try {
-      const marketData = await getMarketValue(listing, sport);
+      const marketData = await getMarketValue(listing, sport, playerName);
       const card = shortCard(listing);
 
-      // Skip if market value unknown
       if (!marketData || !marketData.value) {
-        const reason = marketData?.error || 'no match';
-        console.log(`  SKIP | $${listing.currentPrice} | ${card} | ${reason}`);
-        await logScan(listing, sport, platform, 'rejected', reason, null, null);
+        // Log to scan_log with actual error reason
+        const reason = marketData?.error || 'no_market_value';
+        logScan(listing, sport, platform, 'rejected', reason, null, null);
         continue;
       }
 
       const dealScore = calculateDealScore(listing.currentPrice, marketData.value);
-      const matchedTo = marketData.matchedTo || marketData.productName || '';
 
       if (dealScore < settings.minDealScore) {
-        console.log(`  SKIP | $${listing.currentPrice} → $${marketData.value} (${dealScore}%) | ${card} | score < ${settings.minDealScore}%`);
-        await logScan(listing, sport, platform, 'rejected', `score ${dealScore}% < min ${settings.minDealScore}%`, marketData, dealScore);
+        // Log to scan_log - deal score too low
+        logScan(listing, sport, platform, 'rejected', `score_${dealScore}%_below_${settings.minDealScore}%`, marketData, dealScore);
         continue;
       }
 
@@ -240,16 +252,19 @@ async function processListings(listings, sport, platform) {
           platform: platform,
           is_active: true
         });
+        // Log to scan_log - saved as deal
+        logScan(listing, sport, platform, 'saved', null, marketData, dealScore);
+        console.log(`  DEAL | $${listing.currentPrice} → $${marketData.value} (${dealScore}%) | ${card}`);
         saved++;
-        console.log(`  DEAL | $${listing.currentPrice} → $${marketData.value} (${dealScore}%) | ${card} → ${matchedTo}`);
-        await logScan(listing, sport, platform, 'saved', null, marketData, dealScore);
       } else {
-        await logScan(listing, sport, platform, 'matched', 'already exists', marketData, dealScore);
+        // Log to scan_log - already exists
+        logScan(listing, sport, platform, 'duplicate', 'already_exists', marketData, dealScore);
       }
     } catch (e) {
-      await logScan(listing, sport, platform, 'rejected', 'error: ' + e.message, null, null);
+      // Silent fail for individual cards
     }
   }
+
   return saved;
 }
 
@@ -257,43 +272,60 @@ async function scanPlayer(player, sport) {
   const queries = buildQueries(player);
   let total = 0;
 
-  for (const query of queries) {
-    // Try eBay if credentials are configured
-    if (hasEbayKeys) {
-      try {
-        const listings = await ebay.searchListings({ query, sport, limit: 20, maxPrice: settings.maxPrice });
-        if (listings.length > 0) {
-          total += await processListings(listings, sport, 'ebay');
-        }
-        await new Promise(r => setTimeout(r, 2000));
-      } catch (e) {
-        // Silent fail
-      }
-    }
-
-    // Also try COMC
+  // Run both queries in parallel for speed
+  if (hasEbayKeys) {
     try {
-      const listings = await comc.searchListings({ query, sport, limit: 15 });
-      if (listings.length > 0) {
-        total += await processListings(listings, sport, 'comc');
+      const allListings = await Promise.all(
+        queries.map(query => ebay.searchListings({ query, sport, limit: 20, maxPrice: settings.maxPrice }).catch(() => []))
+      );
+
+      // Combine and dedupe by itemId
+      const seen = new Set();
+      const combined = [];
+      for (const listings of allListings) {
+        for (const l of listings) {
+          if (!seen.has(l.ebayItemId)) {
+            seen.add(l.ebayItemId);
+            combined.push(l);
+          }
+        }
       }
-      await new Promise(r => setTimeout(r, 3000));
+
+      if (combined.length > 0) {
+        total = await processListings(combined, sport, 'ebay', player);
+      }
     } catch (e) {
       // Silent fail
     }
   }
+
   return total;
 }
 
 async function runWorker() {
-  console.log('CardSnipe Worker | Sources: ' + (hasEbayKeys ? 'eBay + ' : '') + 'COMC');
+  console.log('CardSnipe Worker | Source: eBay' + (hasEbayKeys ? '' : ' (no keys configured!)'));
+  console.log('SERVER_URL: ' + (process.env.SERVER_URL || 'NOT SET (using localhost:3001)'));
+
+  // Check if local pricing data is available
+  try {
+    const hasLocalData = await localPricing.hasData();
+    useLocalPricing = hasLocalData;
+    console.log('Pricing: ' + (useLocalPricing ? 'LOCAL DATABASE (fast!)' : 'SportsCardPro API (rate limited)'));
+  } catch (e) {
+    console.log('Pricing: SportsCardPro API (rate limited)');
+  }
 
   while (true) {
     try {
       await fetchSettings();
       const monitoredPlayers = await getMonitoredPlayers();
 
-      console.log('\n=== SCAN ' + new Date().toLocaleTimeString() + ' ===');
+      // Re-check local pricing availability each cycle
+      try {
+        useLocalPricing = await localPricing.hasData();
+      } catch (e) {}
+
+      console.log('\n=== SCAN ' + new Date().toLocaleTimeString() + (useLocalPricing ? ' [LOCAL]' : ' [API]') + ' ===');
       let totalNew = 0;
 
       if (monitoredPlayers.basketball.length > 0) {

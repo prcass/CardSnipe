@@ -128,6 +128,33 @@ const api = {
     const response = await fetch(`${API_URL}/api/scan-count`);
     if (!response.ok) throw new Error('Failed to fetch scan count');
     return response.json();
+  },
+
+  async uploadPriceData(file, sport) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('sport', sport);
+    const response = await fetch(`${API_URL}/api/price-data/upload`, {
+      method: 'POST',
+      body: formData
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Upload failed');
+    }
+    return response.json();
+  },
+
+  async getPriceDataStats() {
+    const response = await fetch(`${API_URL}/api/price-data/stats`);
+    if (!response.ok) throw new Error('Failed to fetch price data stats');
+    return response.json();
+  },
+
+  async deletePriceData() {
+    const response = await fetch(`${API_URL}/api/price-data`, { method: 'DELETE' });
+    if (!response.ok) throw new Error('Failed to delete price data');
+    return response.json();
   }
 };
 
@@ -167,6 +194,10 @@ const CardDealFinder = () => {
   const [scanLog, setScanLog] = useState([]);
   const [scanLogFilter, setScanLogFilter] = useState('rejected');
   const [scanLogSort, setScanLogSort] = useState({ field: 'scanned_at', dir: 'desc' });
+  const [showPriceData, setShowPriceData] = useState(false);
+  const [priceDataStats, setPriceDataStats] = useState(null);
+  const [uploadingSport, setUploadingSport] = useState('basketball');
+  const [uploading, setUploading] = useState(false);
 
   // Fetch deals from API
   const fetchDeals = useCallback(async () => {
@@ -232,6 +263,15 @@ const CardDealFinder = () => {
       }).catch(() => {});
     }
   }, [showScanLog, scanLogFilter]);
+
+  // Fetch price data stats when panel opens
+  useEffect(() => {
+    if (showPriceData) {
+      api.getPriceDataStats().then(res => {
+        if (res.success) setPriceDataStats(res.data);
+      }).catch(() => setPriceDataStats(null));
+    }
+  }, [showPriceData]);
 
   // Sort scan log
   const sortedScanLog = [...scanLog].sort((a, b) => {
@@ -306,6 +346,39 @@ const CardDealFinder = () => {
       alert(err.message);
     } finally {
       setImporting(false);
+    }
+  };
+
+  const uploadPriceCSV = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setUploading(true);
+      const res = await api.uploadPriceData(file, uploadingSport);
+      if (res.success) {
+        alert(`Uploaded ${res.data.imported} prices from ${file.name}`);
+        // Refresh stats
+        const statsRes = await api.getPriceDataStats();
+        if (statsRes.success) setPriceDataStats(statsRes.data);
+      }
+    } catch (err) {
+      alert('Upload failed: ' + err.message);
+    } finally {
+      setUploading(false);
+      e.target.value = ''; // Reset file input
+    }
+  };
+
+  const clearPriceData = async () => {
+    if (!window.confirm('Delete all price data? The worker will fall back to API lookups.')) return;
+    try {
+      const res = await api.deletePriceData();
+      if (res.success) {
+        alert(`Deleted ${res.data.deleted} price records`);
+        setPriceDataStats(null);
+      }
+    } catch (err) {
+      alert('Failed to delete: ' + err.message);
     }
   };
 
@@ -465,6 +538,12 @@ const CardDealFinder = () => {
               👤 Players
             </button>
             <button
+              onClick={() => setShowPriceData(!showPriceData)}
+              className={`px-4 py-2 rounded-lg font-medium ${priceDataStats?.total > 0 ? 'bg-green-700 hover:bg-green-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+            >
+              💰 Prices
+            </button>
+            <button
               onClick={() => setShowSettings(!showSettings)}
               className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg font-medium"
             >
@@ -547,6 +626,68 @@ const CardDealFinder = () => {
             </div>
             <p className="text-xs text-gray-500 mt-2">
               Note: Only PSA 9 and PSA 10 graded cards are searched.
+            </p>
+          </div>
+        )}
+
+        {/* Price Data Panel */}
+        {showPriceData && (
+          <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-4">
+            <h3 className="font-bold mb-3">💰 Local Price Data</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              Upload CSV exports from SportsCardPro for instant local price lookups (no API rate limits!)
+            </p>
+
+            {/* Stats */}
+            {priceDataStats && priceDataStats.total > 0 ? (
+              <div className="bg-green-900/30 border border-green-700 rounded-lg p-3 mb-4">
+                <div className="text-green-400 font-medium mb-1">Local pricing active</div>
+                <div className="text-sm text-gray-300">
+                  {priceDataStats.total.toLocaleString()} prices loaded
+                  {priceDataStats.basketball > 0 && ` | Basketball: ${priceDataStats.basketball.toLocaleString()}`}
+                  {priceDataStats.baseball > 0 && ` | Baseball: ${priceDataStats.baseball.toLocaleString()}`}
+                </div>
+              </div>
+            ) : (
+              <div className="bg-yellow-900/30 border border-yellow-700 rounded-lg p-3 mb-4">
+                <div className="text-yellow-400 font-medium">No local price data</div>
+                <div className="text-sm text-gray-300">Upload SportsCardPro CSVs below to enable fast local lookups.</div>
+              </div>
+            )}
+
+            {/* Upload Form */}
+            <div className="flex gap-3 items-center mb-4">
+              <select
+                value={uploadingSport}
+                onChange={(e) => setUploadingSport(e.target.value)}
+                className="bg-gray-700 rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="basketball">Basketball</option>
+                <option value="baseball">Baseball</option>
+              </select>
+              <label className={`flex-1 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium text-center cursor-pointer ${uploading ? 'opacity-50' : ''}`}>
+                {uploading ? 'Uploading...' : 'Upload CSV'}
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={uploadPriceCSV}
+                  disabled={uploading}
+                  className="hidden"
+                />
+              </label>
+              {priceDataStats?.total > 0 && (
+                <button
+                  onClick={clearPriceData}
+                  className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg font-medium"
+                >
+                  Clear All
+                </button>
+              )}
+            </div>
+
+            <p className="text-xs text-gray-500">
+              Download CSVs from SportsCardPro console pages (e.g., "2023 Panini Prizm Basketball").
+              Expected columns: id, console-name, product-name, loose-price, graded-price, manual-only-price, bgs-10-price
             </p>
           </div>
         )}
