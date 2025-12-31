@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 // ============================================
 // CONFIGURATION - Update this after deployment!
 // ============================================
-const APP_VERSION = '1.0.7';
+const APP_VERSION = '1.0.8';
 const API_URL = 'https://web-production-5c18.up.railway.app';
 
 // ============================================
@@ -437,8 +437,10 @@ const CardDealFinder = () => {
       const result = await api.clearData();
       setScanCount(0); // Reset scan counter display
       setScanStartTime(new Date()); // Reset scan start time
-      alert('Cleared ' + result.deleted + ' listings from database');
-      fetchDeals();
+      setListings([]); // Immediately clear displayed listings
+      setStats(null); // Clear stats
+      alert('Cleared ' + (result.deleted || 0) + ' listings from database');
+      fetchDeals(); // Refresh from server
     } catch (err) {
       alert('Failed to clear data: ' + err.message);
     } finally {
