@@ -188,6 +188,14 @@ app.delete('/api/clear-data', async (req, res) => {
   try {
     let deletedListings = 0;
     let deletedScanLog = 0;
+    let deletedReports = 0;
+
+    // Delete reported_issues first (foreign key constraint)
+    try {
+      deletedReports = await db('reported_issues').del();
+    } catch (e) {
+      console.log('Could not clear reported_issues:', e.message);
+    }
 
     // Delete listings
     try {
@@ -196,7 +204,7 @@ app.delete('/api/clear-data', async (req, res) => {
       console.log('Could not clear listings:', e.message);
     }
 
-    // Delete scan_log (table might not exist in older deployments)
+    // Delete scan_log
     try {
       deletedScanLog = await db('scan_log').del();
     } catch (e) {
@@ -206,7 +214,7 @@ app.delete('/api/clear-data', async (req, res) => {
     // Reset scan counter
     scanCounter.total = 0;
     scanCounter.lastReset = new Date();
-    console.log('Cleared ' + deletedListings + ' listings, ' + deletedScanLog + ' scan log entries, reset scan counter');
+    console.log('Cleared ' + deletedListings + ' listings, ' + deletedScanLog + ' scan log, ' + deletedReports + ' reports');
     res.json({ success: true, deleted: deletedListings, scanLogDeleted: deletedScanLog });
   } catch (error) {
     console.error('Error clearing data:', error);
