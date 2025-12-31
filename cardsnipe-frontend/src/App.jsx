@@ -687,7 +687,7 @@ const CardDealFinder = () => {
 
             <p className="text-xs text-gray-500">
               Download CSVs from SportsCardPro console pages (e.g., "2023 Panini Prizm Basketball").
-              Expected columns: id, console-name, product-name, loose-price, graded-price, manual-only-price, bgs-10-price
+              Expected columns: id, console-name, product-name, loose-price, cib-price, new-price, graded-price, box-only-price, manual-only-price, bgs-10-price
             </p>
           </div>
         )}
