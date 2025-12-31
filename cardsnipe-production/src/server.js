@@ -365,7 +365,7 @@ app.post('/api/price-data/upload', upload.single('file'), async (req, res) => {
     }
 
     console.log(`Inserted ${inserted} price records for ${sport}`);
-    res.json({ success: true, inserted, sport, file: sourceFile });
+    res.json({ success: true, data: { imported: inserted, sport, file: sourceFile } });
   } catch (error) {
     console.error('CSV upload error:', error);
     res.status(500).json({ success: false, error: error.message });
